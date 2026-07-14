@@ -14,3 +14,4 @@ runtime/*
 !runtime/.gitkeep
 !runtime/meetings/
 runtime/meetings/*
+runtime/secrets/

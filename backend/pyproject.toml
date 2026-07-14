@@ -2,7 +2,7 @@
 name = "meeting-copilot"
 version = "0.1.0"
 description = "Local-first meeting discussion copilot"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
   "aiosqlite>=0.20",
   "alembic>=1.13",
@@ -16,10 +16,17 @@ dependencies = [
   "uvicorn[standard]>=0.32",
   "asyncpg>=0.30",
   "redis>=5.2",
+  "reportlab>=4.2",
+  "argon2-cffi>=23.1",
 ]
 
 [project.optional-dependencies]
-stt = ["faster-whisper>=1.1", "numpy>=1.26"]
+stt = [
+  "faster-whisper>=1.1",
+  "numpy>=1.26",
+  "nvidia-cublas-cu12>=12.4",
+  "nvidia-cudnn-cu12>=9.1",
+]
 dev = [
   "mypy>=1.13",
   "pytest>=8.3",
@@ -34,13 +41,25 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+ignore = ["B008"] # FastAPI dependency injection intentionally uses Depends() defaults.
+
+[tool.ruff.lint.per-file-ignores]
+"tests/integration_check.py" = ["E402", "E501"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 exclude = ["migrations"]
+
+[[tool.mypy.overrides]]
+module = ["faster_whisper", "numpy", "reportlab.*"]
+ignore_missing_imports = true
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["migrations*", "tests*"]

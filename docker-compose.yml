@@ -1,29 +1,265 @@
+name: meeting-copilot
+
+x-service-security: &service-security
+  read_only: true
+  cap_drop: [ALL]
+  security_opt:
+    - no-new-privileges:true
+  restart: unless-stopped
+
 services:
-  backend:
-    build: {context: ., dockerfile: backend/Dockerfile}
-    environment:
-      MC_DATABASE_URL: ${MC_DATABASE_URL:-sqlite+aiosqlite:////app/runtime/meeting-copilot.db}
-      MC_ALLOWED_ORIGINS: http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:8080
-    volumes: ["./runtime:/app/runtime"]
-    ports: ["127.0.0.1:8000:8000"]
+  reverse-proxy:
+    <<: *service-security
+    build:
+      context: .
+      dockerfile: reverse-proxy/Dockerfile
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    networks: [frontend-edge, app-internal]
+    group_add:
+      - "${HOST_GID:-1000}"
+    ports:
+      - "0.0.0.0:80:8080"
+      - "0.0.0.0:443:8443"
+    volumes:
+      - ./runtime/tls:/etc/nginx/tls:ro
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   frontend:
-    build: {context: ., dockerfile: frontend/Dockerfile}
-    depends_on: [backend]
-    ports: ["127.0.0.1:8080:80"]
+    <<: *service-security
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    networks: [frontend-edge]
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /var/run
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    <<: *service-security
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: backend
+    environment:
+      SERVICE_UID: "10001"
+      SERVICE_GID: "10001"
+      SERVICE_HOME: /home/meeting
+      SERVICE_USER: meeting
+      SERVICE_WRITABLE_PATHS: /app/runtime:/app/runtime/audio
+      MC_ALLOWED_ORIGINS: https://127.0.0.1,https://localhost,https://10.110.51.105
+      MC_REDIS_URL: redis://redis:6379/0
+      MC_STT_WORKER_URL: http://stt-worker:8001
+      MC_CODEX_WORKER_URL: http://codex-worker:8002
+      MC_TTS_WORKER_URL: http://tts-worker:8003
+      MC_WORKER_TOKEN_FILE: /run/secrets/worker_token
+      MC_RUNTIME_DIR: /app/runtime
+      MC_REMOTE_AUTH_REQUIRED: "true"
+      MC_AUTH_SESSION_HOURS: "24"
+    secrets: [worker_token, postgres_password]
+    user: "0:0"
+    cap_add: [CHOWN, DAC_OVERRIDE, SETGID, SETUID]
+    volumes:
+      - meeting-data:/app/runtime
+      - audio-data:/app/runtime/audio
+    networks: [app-internal]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      stt-worker:
+        condition: service_healthy
+      codex-worker:
+        condition: service_healthy
+      tts-worker:
+        condition: service_healthy
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   stt-worker:
-    profiles: ["gpu"]
-    build: {context: ., dockerfile: backend/Dockerfile}
-    command: ["python", "-c", "from faster_whisper import WhisperModel; WhisperModel('large-v3-turbo', device='cuda', compute_type='float16'); import time; time.sleep(1000000)"]
-    deploy: {resources: {reservations: {devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]}}}
-    volumes: ["whisper-cache:/root/.cache/huggingface"]
+    <<: *service-security
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: stt-worker
+    environment:
+      SERVICE_UID: "10001"
+      SERVICE_GID: "10001"
+      SERVICE_HOME: /home/meeting
+      SERVICE_USER: meeting
+      SERVICE_WRITABLE_PATHS: /models/huggingface
+      MC_STT_MODEL: ${MC_STT_MODEL:-large-v3-turbo}
+      MC_STT_DEVICE: ${MC_STT_DEVICE:-cuda}
+      MC_STT_COMPUTE_TYPE: ${MC_STT_COMPUTE_TYPE:-float16}
+      MC_STT_FALLBACK_MODEL: ${MC_STT_FALLBACK_MODEL:-medium}
+      MC_WORKER_TOKEN_FILE: /run/secrets/worker_token
+      HF_HOME: /models/huggingface
+    secrets: [worker_token]
+    user: "0:0"
+    cap_add: [CHOWN, DAC_OVERRIDE, SETGID, SETUID]
+    volumes:
+      - model-cache:/models/huggingface
+    networks: [worker-egress, app-internal]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 10m
+
+  codex-worker:
+    <<: *service-security
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.codex
+    environment:
+      SERVICE_UID: "10002"
+      SERVICE_GID: "10002"
+      SERVICE_HOME: /home/codex
+      SERVICE_USER: codex
+      SERVICE_WRITABLE_PATHS: /home/codex/.codex:/app/runtime
+      MC_CODEX_BIN: codex
+      MC_WORKER_TOKEN_FILE: /run/secrets/worker_token
+      MC_RUNTIME_DIR: /app/runtime
+      MC_REDIS_URL: redis://redis:6379/0
+    secrets: [worker_token]
+    user: "0:0"
+    cap_add: [CHOWN, DAC_OVERRIDE, SETGID, SETUID]
+    volumes:
+      - codex-auth:/home/codex/.codex
+      - codex-runtime:/app/runtime
+    networks: [worker-egress, app-internal]
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  tts-worker:
+    <<: *service-security
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: tts-worker
+    environment:
+      SERVICE_UID: "10001"
+      SERVICE_GID: "10001"
+      SERVICE_HOME: /home/meeting
+      SERVICE_USER: meeting
+      MC_WORKER_TOKEN_FILE: /run/secrets/worker_token
+    secrets: [worker_token]
+    user: "0:0"
+    cap_add: [CHOWN, DAC_OVERRIDE, SETGID, SETUID]
+    networks: [app-internal]
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   postgres:
-    profiles: ["production"]
     image: postgres:17-alpine
-    environment: {POSTGRES_USER: meeting, POSTGRES_PASSWORD: meeting-local-only, POSTGRES_DB: meeting_copilot}
-    volumes: ["postgres-data:/var/lib/postgresql/data"]
+    environment:
+      POSTGRES_USER: meeting
+      POSTGRES_DB: meeting_copilot
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [app-internal]
+    cap_drop: [NET_RAW]
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /var/run/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U meeting -d meeting_copilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
   redis:
-    profiles: ["production"]
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
-    volumes: ["redis-data:/data"]
-volumes: {whisper-cache: {}, postgres-data: {}, redis-data: {}}
+    volumes:
+      - redis-data:/data
+    networks: [app-internal]
+    cap_drop: [NET_RAW]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  e2e:
+    profiles: [test]
+    build:
+      context: .
+      dockerfile: e2e/Dockerfile
+    network_mode: host
+    environment:
+      BASE_URL: https://localhost
+    depends_on:
+      reverse-proxy:
+        condition: service_healthy
+
+secrets:
+  worker_token:
+    file: ./runtime/secrets/worker-token
+  postgres_password:
+    file: ./runtime/secrets/postgres-password
+
+volumes:
+  postgres-data:
+  redis-data:
+  codex-auth:
+  codex-runtime:
+  meeting-data:
+  audio-data:
+  model-cache:
+
+networks:
+  frontend-edge:
+  app-internal:
+    internal: true
+  worker-egress:

@@ -1,0 +1,4 @@
+services:
+  backend:
+    environment:
+      MC_DATABASE_URL: sqlite+aiosqlite:////app/runtime/meeting-copilot.db
