@@ -3,6 +3,7 @@
 Revision ID: 0001
 Revises:
 """
+
 from alembic import op
 
 from app.db.base import Base

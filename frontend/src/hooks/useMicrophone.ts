@@ -1,15 +1,138 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export interface MicrophoneState { active:boolean; level:number; error:string|null; devices:MediaDeviceInfo[]; start:(deviceId?:string,onChunk?:(chunk:ArrayBuffer)=>void)=>Promise<void>; stop:()=>void; }
+export interface MicrophoneState {
+  active: boolean;
+  level: number;
+  error: string | null;
+  devices: MediaDeviceInfo[];
+  start: (deviceId?: string, onChunk?: (chunk: ArrayBuffer) => void) => Promise<void>;
+  stop: () => void;
+}
 
-const processorCode = `class PCMProcessor extends AudioWorkletProcessor {
-  process(inputs) { const input=inputs[0]&&inputs[0][0]; if(!input)return true; const ratio=sampleRate/16000; const size=Math.floor(input.length/ratio); const pcm=new Int16Array(size); for(let i=0;i<size;i++){const sample=Math.max(-1,Math.min(1,input[Math.floor(i*ratio)]));pcm[i]=sample<0?sample*32768:sample*32767;} this.port.postMessage(pcm.buffer,[pcm.buffer]); return true; }
-} registerProcessor('pcm-processor',PCMProcessor);`;
+function legacyProcessor(context: AudioContext, onChunk?: (chunk: ArrayBuffer) => void) {
+  const processor = context.createScriptProcessor(4096, 1, 1);
+  processor.onaudioprocess = event => {
+    const input = event.inputBuffer.getChannelData(0);
+    const ratio = context.sampleRate / 16000;
+    const pcm = new Int16Array(Math.floor(input.length / ratio));
+    for (let index = 0; index < pcm.length; index += 1) {
+      const sample = Math.max(-1, Math.min(1, input[Math.floor(index * ratio)] ?? 0));
+      pcm[index] = sample < 0 ? sample * 32768 : sample * 32767;
+    }
+    onChunk?.(pcm.buffer);
+  };
+  return processor;
+}
 
-export function useMicrophone():MicrophoneState{
-  const [active,setActive]=useState(false); const [level,setLevel]=useState(0); const [error,setError]=useState<string|null>(null); const [devices,setDevices]=useState<MediaDeviceInfo[]>([]);
-  const resources=useRef<{stream:MediaStream;context:AudioContext;node:AudioNode;timer:number}|null>(null);
-  const stop=useCallback(()=>{const item=resources.current;if(item){item.stream.getTracks().forEach(track=>track.stop());item.node.disconnect();void item.context.close();cancelAnimationFrame(item.timer);resources.current=null;}setActive(false);setLevel(0);},[]);
-  const start=useCallback(async(deviceId?:string,onChunk?:(chunk:ArrayBuffer)=>void)=>{stop();setError(null);try{const stream=await navigator.mediaDevices.getUserMedia({audio:{deviceId:deviceId?{exact:deviceId}:undefined,channelCount:1,echoCancellation:true,noiseSuppression:true}});const context=new AudioContext();const source=context.createMediaStreamSource(stream);const analyser=context.createAnalyser();analyser.fftSize=256;source.connect(analyser);let node:AudioNode;if(context.audioWorklet){const url=URL.createObjectURL(new Blob([processorCode],{type:"text/javascript"}));await context.audioWorklet.addModule(url);URL.revokeObjectURL(url);const worklet=new AudioWorkletNode(context,"pcm-processor");worklet.port.onmessage=(event:MessageEvent<ArrayBuffer>)=>onChunk?.(event.data);source.connect(worklet);worklet.connect(context.destination);node=worklet;}else{const script=context.createScriptProcessor(4096,1,1);script.onaudioprocess=(event)=>{const input=event.inputBuffer.getChannelData(0);const ratio=context.sampleRate/16000;const pcm=new Int16Array(Math.floor(input.length/ratio));for(let i=0;i<pcm.length;i++){const sample=Math.max(-1,Math.min(1,input[Math.floor(i*ratio)]??0));pcm[i]=sample<0?sample*32768:sample*32767;}onChunk?.(pcm.buffer);};source.connect(script);script.connect(context.destination);node=script;}const values=new Uint8Array(analyser.frequencyBinCount);let timer=0;const meter=()=>{analyser.getByteTimeDomainData(values);let sum=0;for(const value of values){const normalized=(value-128)/128;sum+=normalized*normalized;}setLevel(Math.min(1,Math.sqrt(sum/values.length)*4));timer=requestAnimationFrame(meter);};meter();resources.current={stream,context,node,timer};setActive(true);setDevices((await navigator.mediaDevices.enumerateDevices()).filter(item=>item.kind==="audioinput"));}catch(reason){setError(reason instanceof Error?reason.message:"Microphone unavailable");stop();throw reason;}},[stop]);
-  useEffect(()=>stop,[stop]); return {active,level,error,devices,start,stop};
+async function workletProcessor(
+  context: AudioContext,
+  onChunk?: (chunk: ArrayBuffer) => void,
+): Promise<AudioWorkletNode> {
+  let timeout = 0;
+  try {
+    await Promise.race([
+      context.audioWorklet.addModule("/pcm-processor.js"),
+      new Promise<never>((_, reject) => {
+        timeout = window.setTimeout(() => reject(new Error("AudioWorklet load timed out")), 3000);
+      }),
+    ]);
+  } finally {
+    window.clearTimeout(timeout);
+  }
+  const processor = new AudioWorkletNode(context, "pcm-processor");
+  processor.port.onmessage = (event: MessageEvent<ArrayBuffer>) => onChunk?.(event.data);
+  return processor;
+}
+
+export function useMicrophone(): MicrophoneState {
+  const [active, setActive] = useState(false);
+  const [level, setLevel] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const resources = useRef<{
+    stream: MediaStream;
+    context: AudioContext;
+    node: AudioNode;
+    timer: number;
+  } | null>(null);
+
+  const stop = useCallback(() => {
+    const item = resources.current;
+    if (item) {
+      item.stream.getTracks().forEach(track => track.stop());
+      item.node.disconnect();
+      void item.context.close();
+      cancelAnimationFrame(item.timer);
+      resources.current = null;
+    }
+    setActive(false);
+    setLevel(0);
+  }, []);
+
+  const start = useCallback(async (
+    deviceId?: string,
+    onChunk?: (chunk: ArrayBuffer) => void,
+  ) => {
+    stop();
+    setError(null);
+    let stream: MediaStream | null = null;
+    let context: AudioContext | null = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: deviceId ? { exact: deviceId } : undefined,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+      context = new AudioContext();
+      await context.resume();
+      const source = context.createMediaStreamSource(stream);
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+
+      let node: AudioNode;
+      if (context.audioWorklet) {
+        try {
+          node = await workletProcessor(context, onChunk);
+        } catch {
+          node = legacyProcessor(context, onChunk);
+        }
+      } else {
+        node = legacyProcessor(context, onChunk);
+      }
+      source.connect(node);
+      node.connect(context.destination);
+
+      const values = new Uint8Array(analyser.frequencyBinCount);
+      let timer = 0;
+      const meter = () => {
+        analyser.getByteTimeDomainData(values);
+        let sum = 0;
+        for (const value of values) {
+          const normalized = (value - 128) / 128;
+          sum += normalized * normalized;
+        }
+        setLevel(Math.min(1, Math.sqrt(sum / values.length) * 4));
+        timer = requestAnimationFrame(meter);
+      };
+      meter();
+      resources.current = { stream, context, node, timer };
+      setActive(true);
+      setDevices(
+        (await navigator.mediaDevices.enumerateDevices()).filter(item => item.kind === "audioinput"),
+      );
+    } catch (reason) {
+      stream?.getTracks().forEach(track => track.stop());
+      if (context) void context.close();
+      setError(reason instanceof Error ? reason.message : "Microphone unavailable");
+      stop();
+      throw reason;
+    }
+  }, [stop]);
+
+  useEffect(() => stop, [stop]);
+  return { active, level, error, devices, start, stop };
 }

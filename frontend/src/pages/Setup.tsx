@@ -1,20 +1,67 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { Check, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle, Mic, Play, RefreshCw, Volume2 } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle, Mic, RefreshCw, Volume2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { getSystem, post } from "../lib/api";
+import { getCodexStatus, getProviders, getSettings, getSystem, LanguageCode, post, put, SettingsData } from "../lib/api";
 import { useMicrophone } from "../hooks/useMicrophone";
 
-const steps=["系統檢查","Codex 驗證","推理設定","STT 測試","TTS 測試","麥克風","完成"];
-export function Setup(){const [step,setStep]=useState(0);const navigate=useNavigate();const system=useQuery({queryKey:["system"],queryFn:getSystem});const mic=useMicrophone();const codexTest=useMutation({mutationFn:()=>post<{healthy:boolean;error:string}>("/codex/test")});
-  const checks=useMemo(()=>system.data?[ ["Python 3.10+",Number(system.data.python_version.split(".")[0])>=3], ["Database",system.data.database.healthy], ["FFmpeg",system.data.ffmpeg_available], ["Codex CLI",system.data.codex.installed], ["NVIDIA / CUDA",system.data.gpu.available], ["Docker",system.data.docker_available] ]:[],[system.data]);
-  const speak=()=>{speechSynthesis.cancel();const utterance=new SpeechSynthesisUtterance("Meeting Copilot 語音測試正常");utterance.lang="zh-TW";speechSynthesis.speak(utterance)};
-  return <div className="page"><header className="page-head"><div><p className="eyebrow">INITIAL SETUP</p><h1>設定精靈</h1><p>逐項驗證本機依賴與會議裝置。</p></div></header><div className="wizard"><ol>{steps.map((label,index)=><li className={index===step?"active":index<step?"done":""} key={label}><span>{index<step?<Check size={14}/>:index+1}</span>{label}</li>)}</ol><section className="wizard-body">
-    {step===0&&<><h2>系統檢查</h2><p>必要元件會直接由後端檢測；GPU 缺失時 STT 可切換 CPU 備援。</p><div className="check-list">{system.isPending?<LoaderCircle className="spin"/>:checks.map(([label,ok])=><div key={String(label)}><span className={`check-icon ${ok?"pass":"fail"}`}>{ok?<Check size={16}/>:<CircleAlert size={16}/>}</span><strong>{label}</strong><span>{ok?"通過":"需要處理"}</span></div>)}</div><button className="button" onClick={()=>void system.refetch()}><RefreshCw size={16}/>重新檢查</button></>}
-    {step===1&&<><h2>Codex 驗證</h2><p>使用主機既有 Codex 登入，不讀取或顯示 credential file。</p><div className="fact-grid"><div><span>CLI</span><strong>{system.data?.codex.version??"未安裝"}</strong></div><div><span>狀態</span><strong>{system.data?.codex.authenticated?"已登入":"待登入"}</strong></div></div><div className="button-row"><button className="button primary" onClick={()=>codexTest.mutate()} disabled={codexTest.isPending}>測試 Codex</button><button className="button" onClick={()=>void post("/codex/login/start")}>啟動裝置登入</button><button className="button" onClick={()=>void post("/codex/login/cancel")}>取消登入</button><button className="button" onClick={()=>void post("/codex/logout").then(()=>system.refetch())}>登出</button><button className="button" onClick={()=>alert(JSON.stringify(system.data?.codex??{},null,2))}>檢視遮罩設定</button><button className="icon-button" title="重新整理" onClick={()=>void system.refetch()}><RefreshCw/></button></div>{codexTest.data&&<div className={`alert ${codexTest.data.healthy?"success":"error"}`}>{codexTest.data.healthy?"Codex structured task 完成":codexTest.data.error}</div>}</>}
-    {step===2&&<><h2>推理設定</h2><p>預設為唯讀 sandbox、無核准、無 repository context。模型與 profile 由 Providers 頁面管理。</p><div className="policy"><div><span>Sandbox</span><strong>read-only</strong></div><div><span>Network</span><strong>disabled</strong></div><div><span>Repository</span><strong>disabled</strong></div><div><span>Timeout</span><strong>180 sec</strong></div></div></>}
-    {step===3&&<><h2>STT 設定</h2><p>預設載入 <code>large-v3-turbo</code>、CUDA float16、VAD；CUDA 初始化失敗時切換 medium CPU int8。</p><div className="fact-grid"><div><span>GPU</span><strong>{system.data?.gpu.gpus[0]?.name??"CPU fallback"}</strong></div><div><span>FFmpeg</span><strong>{system.data?.ffmpeg_available?"Ready":"Missing"}</strong></div></div><button className="button" onClick={()=>navigate("/diagnostics")}>開啟 benchmark 與診斷</button></>}
-    {step===4&&<><h2>TTS 測試</h2><p>第一階段使用瀏覽器 SpeechSynthesis，只有人員點擊後才播放。</p><button className="button primary" onClick={speak}><Volume2 size={16}/>播放測試語音</button><button className="button" onClick={()=>speechSynthesis.cancel()}>停止播放</button></>}
-    {step===5&&<><h2>麥克風測試</h2><p>瀏覽器取得權限後顯示即時音量；測試音訊不會上傳或保存。</p><div className="meter"><i style={{width:`${mic.level*100}%`}}/></div>{mic.error&&<div className="alert error">{mic.error}</div>}<button className={`button ${mic.active?"":"primary"}`} onClick={()=>mic.active?mic.stop():void mic.start()}><Mic size={16}/>{mic.active?"停止測試":"允許並測試"}</button></>}
-    {step===6&&<><h2>本機系統已設定</h2><p>可隨時回到此頁重新檢測依賴。Codex 與外部端點仍維持機器層級設定。</p><button className="button primary" onClick={()=>{localStorage.setItem("meeting-copilot-setup","complete");navigate("/")}}>開啟會議工作台</button></>}
-    <footer><button className="button" disabled={step===0} onClick={()=>setStep(value=>value-1)}><ChevronLeft size={16}/>上一步</button>{step<6&&<button className="button primary" onClick={()=>setStep(value=>value+1)}>下一步<ChevronRight size={16}/></button>}</footer></section></div></div>}
+const steps = ["系統檢查", "Codex 驗證", "Codex Provider", "STT 設定", "TTS 設定", "語言設定", "麥克風測試", "儲存完成"];
+const languages: Array<[LanguageCode, string]> = [["zh-TW", "繁體中文"], ["zh-CN", "簡體中文"], ["en", "English"], ["ja", "日本語"], ["ko", "한국어"]];
+
+export function Setup() {
+  const [step, setStep] = useState(0);
+  const [languageForm, setLanguageForm] = useState<SettingsData | null>(null);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const system = useQuery({ queryKey: ["system"], queryFn: getSystem });
+  const codex = useQuery({ queryKey: ["codex-status"], queryFn: getCodexStatus });
+  const providers = useQuery({ queryKey: ["providers"], queryFn: getProviders });
+  const settings = useQuery({ queryKey: ["settings"], queryFn: getSettings });
+  const mic = useMicrophone();
+  const action = useMutation({
+    mutationFn: (path: string) => post<Record<string, unknown>>(path),
+    onSuccess: async () => { await codex.refetch(); },
+  });
+  const providerTest = useMutation({ mutationFn: (id: string) => post<{healthy:boolean;detail:string}>(`/providers/${id}/test`) });
+  const form = languageForm ?? settings.data ?? null;
+  const updateLanguage = <K extends keyof SettingsData>(key: K, value: SettingsData[K]) => {
+    if (form) setLanguageForm({ ...form, [key]: value });
+  };
+  const checks = useMemo(() => system.data ? [
+    ["Docker container", system.data.docker_available],
+    ["Docker Compose stack", system.data.docker_compose_available ?? false],
+    ["NVIDIA Container Toolkit", system.data.nvidia_container_toolkit_available ?? false],
+    ["A6000 / CUDA", system.data.gpu.available && (system.data.gpu.cuda_available ?? true)],
+    ["FFmpeg", system.data.ffmpeg_available],
+    ["Codex CLI", system.data.codex.installed],
+    ["PostgreSQL", system.data.database.healthy],
+    ["Redis", system.data.redis.healthy === true],
+    ["Disk space > 5 GB", system.data.disk.free_gb > 5],
+  ] as Array<[string, boolean]> : [], [system.data]);
+  const speak = () => {
+    const utterance = new SpeechSynthesisUtterance("Meeting Copilot 語音測試正常");
+    utterance.lang = form?.tts_language ?? "zh-TW";
+    speechSynthesis.cancel(); speechSynthesis.speak(utterance);
+  };
+  const complete = async () => {
+    if (!form) return;
+    await put("/settings", { ...form, setup_completed: true });
+    localStorage.setItem("meeting-copilot-setup", "complete");
+    await queryClient.invalidateQueries({ queryKey: ["settings"] });
+    navigate("/");
+  };
+  const providerFor = (role: string) => providers.data?.find(item => item.role === role && item.is_default) ?? providers.data?.find(item => item.role === role);
+  const optionList = (special?: [string, string]) => <>{special && <option value={special[0]}>{special[1]}</option>}{languages.map(([code, label]) => <option value={code} key={code}>{label}</option>)}</>;
+
+  return <div className="page"><header className="page-head"><div><p className="eyebrow">INITIAL SETUP</p><h1>設定精靈</h1><p>設定會儲存在後端；credential 僅留在 Codex volume 或環境 secret。</p></div></header><div className="wizard"><ol>{steps.map((label,index)=><li className={index===step?"active":index<step?"done":""} key={label}><span>{index<step?<Check size={14}/>:index+1}</span>{label}</li>)}</ol><section className="wizard-body">
+    {step===0&&<><h2>系統檢查</h2><p>由實際服務健康狀態確認 Compose、GPU、資料庫與工具鏈。</p><div className="check-list">{system.isPending?<LoaderCircle className="spin"/>:checks.map(([label,ok])=><div key={label}><span className={`check-icon ${ok?"pass":"fail"}`}>{ok?<Check size={16}/>:<CircleAlert size={16}/>}</span><strong>{label}</strong><span>{ok?"通過":"需要處理"}</span></div>)}</div><button className="button" onClick={()=>void system.refetch()}><RefreshCw/>重新檢查</button></>}
+    {step===1&&<><h2>Codex 驗證</h2><p>登入流程只在 codex-worker 執行，頁面僅顯示遮罩後狀態。</p><div className="fact-grid"><div><span>CLI</span><strong>{codex.data?.version??"未安裝"}</strong></div><div><span>Authentication</span><strong>{codex.data?.authenticated?"已登入":"尚未登入"}</strong></div><div><span>Profile</span><strong>{codex.data?.profile??"default"}</strong></div><div><span>Last test</span><strong>{codex.data?.last_test?.healthy?"Passed":"Not passed"}</strong></div></div><div className="button-row"><button className="button primary" onClick={()=>action.mutate("/codex/login/start")}>開始登入</button><button className="button" onClick={()=>action.mutate("/codex/login/cancel")}>取消</button><button className="button" onClick={()=>action.mutate("/codex/test")}>測試 Codex</button><button className="button" onClick={()=>navigate("/codex")}>完整狀態</button></div>{action.data&&<div className="alert success"><pre>{JSON.stringify(action.data,null,2)}</pre></div>}</>}
+    {step===2&&<><h2>Codex Provider</h2><p>Reasoning 永遠透過 Codex CLI；可設定 CLI profile、自訂 base URL、model 與 secret reference。</p>{providerFor("reasoning")?<div className="fact-grid"><div><span>Provider</span><strong>{providerFor("reasoning")?.name}</strong></div><div><span>Model</span><strong>{providerFor("reasoning")?.model??"CLI default"}</strong></div><div><span>Sandbox</span><strong>{String(providerFor("reasoning")?.extra.sandbox??"read-only")}</strong></div><div><span>Network</span><strong>{providerFor("reasoning")?.extra.network_access?"enabled":"disabled"}</strong></div></div>:<div className="alert error">尚無 reasoning provider</div>}<button className="button primary" onClick={()=>navigate("/providers")}>管理 Provider</button></>}
+    {step===3&&<><h2>STT 設定</h2><p>本機 faster-whisper 優先使用 A6000，失敗才切換明確的 CPU fallback。</p><div className="fact-grid"><div><span>Provider</span><strong>{providerFor("stt")?.name??"未設定"}</strong></div><div><span>GPU</span><strong>{system.data?.gpu.gpus[0]?.name??"Unavailable"}</strong></div><div><span>Model</span><strong>{providerFor("stt")?.model??"large-v3-turbo"}</strong></div><div><span>Compute</span><strong>{String(providerFor("stt")?.extra.compute_type??"float16")}</strong></div></div>{providerFor("stt")&&<button className="button" onClick={()=>providerTest.mutate(providerFor("stt")!.id)}>測試 STT Provider</button>}{providerTest.data&&<div className={`alert ${providerTest.data.healthy?"success":"error"}`}>{providerTest.data.detail}</div>}</>}
+    {step===4&&<><h2>TTS 設定</h2><p>瀏覽器語音是 fallback；server TTS 可在 Provider registry 中選用。</p><div className="fact-grid"><div><span>Default</span><strong>{providerFor("tts")?.name??"Browser Speech"}</strong></div><div><span>Language</span><strong>{form?.tts_language??"zh-TW"}</strong></div></div><div className="button-row"><button className="button primary" onClick={speak}><Volume2/>播放測試</button><button className="button" onClick={()=>speechSynthesis.cancel()}>停止</button>{providerFor("tts")&&<button className="button" onClick={()=>providerTest.mutate(providerFor("tts")!.id)}>測試 Provider</button>}</div></>}
+    {step===5&&form&&<><h2>語言設定</h2><p>輸入、逐字稿、翻譯、建議、摘要、匯出與 TTS 可獨立設定。</p><div className="form-grid"><label>UI language<select value={form.ui_language} onChange={e=>updateLanguage("ui_language",e.target.value as LanguageCode)}>{optionList()}</select></label><label>Meeting input<select value={form.meeting_input_language} onChange={e=>updateLanguage("meeting_input_language",e.target.value as SettingsData["meeting_input_language"])}>{optionList(["auto","自動偵測"])}</select></label><label>Secondary language<select value={form.secondary_meeting_language} onChange={e=>updateLanguage("secondary_meeting_language",e.target.value as SettingsData["secondary_meeting_language"])}>{optionList(["none","無"])}</select></label><label>Transcript display<select value={form.transcript_display_language} onChange={e=>updateLanguage("transcript_display_language",e.target.value as SettingsData["transcript_display_language"])}>{optionList(["original","原文"])}</select></label><label>Translation<select value={form.translation_language} onChange={e=>updateLanguage("translation_language",e.target.value as SettingsData["translation_language"])}>{optionList(["none","不翻譯"])}</select></label><label>Suggestion output<select value={form.suggestion_output_language} onChange={e=>updateLanguage("suggestion_output_language",e.target.value as LanguageCode)}>{optionList()}</select></label><label>Summary output<select value={form.summary_output_language} onChange={e=>updateLanguage("summary_output_language",e.target.value as LanguageCode)}>{optionList()}</select></label><label>Export<select value={form.export_language} onChange={e=>updateLanguage("export_language",e.target.value as SettingsData["export_language"])}>{optionList(["original","原文"])}</select></label><label>TTS<select value={form.tts_language} onChange={e=>updateLanguage("tts_language",e.target.value as LanguageCode)}>{optionList()}</select></label></div></>}
+    {step===6&&<><h2>麥克風測試</h2><p>瀏覽器取得權限後顯示即時音量；此測試不會上傳或保存音訊。</p><div className="meter"><i style={{width:`${mic.level*100}%`}}/></div>{mic.error&&<div className="alert error">{mic.error}</div>}<button className={`button ${mic.active?"":"primary"}`} onClick={()=>mic.active?mic.stop():void mic.start()}><Mic/>{mic.active?"停止測試":"允許並測試"}</button></>}
+    {step===7&&<><h2>儲存並開始使用</h2><p>所有基礎服務已可用。儲存後仍可從設定精靈、Codex 與 Provider 頁面重新調整。</p><button className="button primary" disabled={!form} onClick={()=>void complete()}>儲存並開啟工作台</button></>}
+    <footer><button className="button" disabled={step===0} onClick={()=>setStep(value=>value-1)}><ChevronLeft/>上一步</button>{step<7&&<button className="button primary" onClick={()=>setStep(value=>value+1)}>下一步<ChevronRight/></button>}</footer>
+  </section></div></div>;
+}

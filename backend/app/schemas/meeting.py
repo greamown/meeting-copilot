@@ -5,9 +5,23 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class MeetingCreate(BaseModel):
+    project_id: str | None = None
     title: str = Field(min_length=1, max_length=200)
     goal: str = Field(default="", max_length=5000)
-    language: str = Field(default="zh", max_length=20)
+    language: Literal["auto", "zh-TW", "zh-CN", "en", "ja", "ko"] = "auto"
+    secondary_language: Literal["none", "zh-TW", "zh-CN", "en", "ja", "ko"] = "none"
+    transcript_display_language: Literal["original", "zh-TW", "zh-CN", "en", "ja", "ko"] = (
+        "original"
+    )
+    translation_language: Literal["none", "zh-TW", "zh-CN", "en", "ja", "ko"] = "none"
+    analysis_language_mode: Literal["original", "translated", "both"] = "original"
+    suggestion_language: Literal["zh-TW", "zh-CN", "en", "ja", "ko"] = "zh-TW"
+    summary_language: Literal["zh-TW", "zh-CN", "en", "ja", "ko"] = "zh-TW"
+    export_language: Literal["original", "zh-TW", "zh-CN", "en", "ja", "ko"] = "original"
+    tts_language: Literal["zh-TW", "zh-CN", "en", "ja", "ko"] = "zh-TW"
+    tts_voice: str = Field(default="", max_length=200)
+    tts_rate: float = Field(default=1, ge=0.5, le=2)
+    tts_volume: float = Field(default=1, ge=0, le=1)
     stt_provider_id: str | None = None
     tts_provider_id: str | None = None
     codex_profile: str | None = None
@@ -37,6 +51,7 @@ class MeetingCreate(BaseModel):
 class MeetingRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    project_id: str | None
     title: str
     goal: str
     language: str
@@ -57,9 +72,12 @@ class TranscriptRead(BaseModel):
     meeting_id: str
     sequence: int
     speaker_id: str | None
+    language: str
+    translated_language: str | None
     start_ms: int
     end_ms: int
     text: str
+    translated_text: str | None
     confidence: float | None
     is_final: bool
     is_edited: bool
@@ -88,9 +106,34 @@ class StatePatch(BaseModel):
     add_risks: list[str] = Field(default_factory=list, max_length=20)
     add_action_items: list[str] = Field(default_factory=list, max_length=20)
     add_parking_lot: list[str] = Field(default_factory=list, max_length=20)
+    add_project_memory: list[str] = Field(default_factory=list, max_length=20)
 
 
-SuggestionCategory = Literal["answer", "missing_decision", "unresolved_question", "contradiction", "risk", "alternative", "summary", "action_item", "off_topic", "no_material_value"]
+class SummaryPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    current_topic: str | None = Field(default=None, max_length=500)
+    discussion_summary: str | None = Field(default=None, max_length=5000)
+
+
+class TranscriptTranslation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    segment_id: str
+    language: Literal["zh-TW", "zh-CN", "en", "ja", "ko"]
+    text: str = Field(min_length=1, max_length=20000)
+
+
+SuggestionCategory = Literal[
+    "answer",
+    "missing_decision",
+    "unresolved_question",
+    "contradiction",
+    "risk",
+    "alternative",
+    "summary",
+    "action_item",
+    "off_topic",
+    "no_material_value",
+]
 
 
 class CodexOutput(BaseModel):
@@ -102,7 +145,11 @@ class CodexOutput(BaseModel):
     reason: str = Field(max_length=2000)
     follow_up_question: str | None = Field(default=None, max_length=1000)
     evidence_segment_ids: list[str]
+    summary_patch: SummaryPatch = Field(default_factory=SummaryPatch)
     state_patch: StatePatch
+    next_steps: list[str] = Field(default_factory=list, max_length=20)
+    suggested_agenda: list[str] = Field(default_factory=list, max_length=20)
+    translations: list[TranscriptTranslation] = Field(default_factory=list, max_length=100)
 
 
 class SuggestionRead(BaseModel):
@@ -124,6 +171,25 @@ class SuggestionRead(BaseModel):
 
 class SuggestionEdit(BaseModel):
     content: str = Field(min_length=1, max_length=1200)
+
+
+class ManualSuggestionCreate(SuggestionEdit):
+    category: Literal[
+        "architecture",
+        "security",
+        "reliability",
+        "performance",
+        "cost",
+        "process",
+        "clarification",
+        "contradiction",
+        "action_item",
+        "decision",
+        "risk",
+        "open_question",
+        "other",
+    ] = "other"
+    reason: str = Field(default="Added by a meeting participant", max_length=2000)
 
 
 class StateItemCreate(BaseModel):

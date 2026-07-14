@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
 
 
@@ -25,8 +25,10 @@ class TriggerDecision:
     suppressed_by: str | None
 
 
-def decide_trigger(context: TriggerContext, manual: bool = False, meeting_end: bool = False) -> TriggerDecision:
-    now = datetime.now(timezone.utc)
+def decide_trigger(
+    context: TriggerContext, manual: bool = False, meeting_end: bool = False
+) -> TriggerDecision:
+    now = datetime.now(UTC)
     if manual:
         return TriggerDecision(True, "manual_ask", None)
     if meeting_end:
@@ -37,8 +39,21 @@ def decide_trigger(context: TriggerContext, manual: bool = False, meeting_end: b
         (context.codex_running, "codex_running"),
         (context.new_characters < context.minimum_characters, "insufficient_transcript"),
         (context.confidence < 0.45, "low_confidence"),
-        (bool(context.last_codex_at and now - context.last_codex_at < timedelta(seconds=context.codex_cooldown_seconds)), "codex_cooldown"),
-        (bool(context.last_suggestion_at and now - context.last_suggestion_at < timedelta(seconds=context.suggestion_cooldown_seconds)), "suggestion_cooldown"),
+        (
+            bool(
+                context.last_codex_at
+                and now - context.last_codex_at < timedelta(seconds=context.codex_cooldown_seconds)
+            ),
+            "codex_cooldown",
+        ),
+        (
+            bool(
+                context.last_suggestion_at
+                and now - context.last_suggestion_at
+                < timedelta(seconds=context.suggestion_cooldown_seconds)
+            ),
+            "suggestion_cooldown",
+        ),
     ]
     for active, reason in suppressors:
         if active:
@@ -54,9 +69,15 @@ def decide_trigger(context: TriggerContext, manual: bool = False, meeting_end: b
 
 
 def similar(a: str, b: str, threshold: float = 0.82) -> bool:
-    normalize = lambda value: "".join(value.lower().split())
+    def normalize(value: str) -> str:
+        return "".join(value.lower().split())
+
     left, right = normalize(a), normalize(b)
-    return bool(left and right and (left == right or SequenceMatcher(None, left, right).ratio() >= threshold))
+    return bool(
+        left
+        and right
+        and (left == right or SequenceMatcher(None, left, right).ratio() >= threshold)
+    )
 
 
 def merge_overlap(previous: str, current: str) -> str:
