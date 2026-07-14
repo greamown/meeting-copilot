@@ -11,6 +11,27 @@
     "reason": {"type": "string", "maxLength": 2000},
     "follow_up_question": {"type": ["string", "null"], "maxLength": 1000},
     "evidence_segment_ids": {"type": "array", "items": {"type": "string"}},
+    "summary_patch": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "current_topic": {"type": ["string", "null"], "maxLength": 500},
+        "discussion_summary": {"type": ["string", "null"], "maxLength": 5000}
+      }
+    },
+    "next_steps": {"type": "array", "maxItems": 20, "items": {"type": "string"}},
+    "suggested_agenda": {"type": "array", "maxItems": 20, "items": {"type": "string"}},
+    "translations": {
+      "type": "array", "maxItems": 100,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["segment_id", "language", "text"],
+        "properties": {
+          "segment_id": {"type": "string"},
+          "language": {"enum": ["zh-TW", "zh-CN", "en", "ja", "ko"]},
+          "text": {"type": "string", "minLength": 1, "maxLength": 20000}
+        }
+      }
+    },
     "state_patch": {
       "type": "object", "additionalProperties": false,
       "required": ["current_topic", "add_decisions", "add_open_questions", "add_risks", "add_action_items", "add_parking_lot"],
@@ -20,7 +41,8 @@
         "add_open_questions": {"type": "array", "items": {"type": "string"}},
         "add_risks": {"type": "array", "items": {"type": "string"}},
         "add_action_items": {"type": "array", "items": {"type": "string"}},
-        "add_parking_lot": {"type": "array", "items": {"type": "string"}}
+        "add_parking_lot": {"type": "array", "items": {"type": "string"}},
+        "add_project_memory": {"type": "array", "maxItems": 20, "items": {"type": "string"}}
       }
     }
   }

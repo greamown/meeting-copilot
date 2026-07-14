@@ -1,42 +1,73 @@
 # Meeting Copilot
 
-Local-first meeting transcription and discussion assistance. Browser audio is converted to 16 kHz mono PCM, transcribed with `faster-whisper`, and persisted locally. **Codex CLI is the only LLM reasoning engine.** Suggestions are schema-validated and never spoken without a user action by default.
+Local-first meeting transcription and discussion assistance. Every server component runs in Docker Compose; the browser is the only host-side runtime. Codex CLI is the sole LLM reasoning engine.
 
-## Quick start (SQLite)
+## Prerequisites
 
-Prerequisites: Python 3.10+ (`python3-venv` recommended), Node 22+, FFmpeg, and Codex CLI. An NVIDIA driver is required for CUDA STT.
+- Docker Engine with Compose v2.
+- NVIDIA driver and NVIDIA Container Toolkit for the A6000.
+- A browser with microphone permission.
+
+Python, Node.js, FFmpeg, faster-whisper, Codex CLI, PostgreSQL, and Redis are installed inside images. They are not required on the host.
+
+## One-command startup
 
 ```bash
-make setup
-make migrate
 make dev
 ```
 
-Open <http://127.0.0.1:5173>. Both API and web UI bind to localhost. `make setup` falls back to a workspace-local `.python-packages` directory if `venv` is unavailable.
+This generates local worker/PostgreSQL secrets under ignored `runtime/secrets`, builds images, and starts:
 
-Docker-only development is one command and uses SQLite:
-
-```bash
-docker compose up --build
+```text
+reverse-proxy
+frontend
+backend
+stt-worker
+codex-worker
+tts-worker
+postgres
+redis
 ```
 
-Open <http://127.0.0.1:8080>. For authenticated Codex jobs, use `make dev` on the host; credentials are user-scoped and are not mounted into containers.
+Open <https://localhost> or `https://<host-lan-ip>` from a device on the same network. HTTP port 80 redirects to HTTPS; no backend or worker port is published.
 
-## Codex authentication
+On first start, `scripts/generate_cert.sh` generates a self-signed certificate for localhost and the detected LAN IPv4. To select the address explicitly:
 
 ```bash
-codex login --device-auth
-codex login status
-make codex-worker
+./scripts/generate_cert.sh 192.168.1.20
 ```
 
-Alternatively use Setup > Codex validation > **Start device login**. Custom providers must reference an environment variable name such as `OPENAI_API_KEY`; the application stores only that name. It never reads or serves `~/.codex/auth.json`.
+Client devices must trust the generated development certificate before browser microphone APIs and WebSockets can be used without certificate warnings. The certificate and private key stay under ignored `runtime/tls`; the key is mounted read-only and is not returned by the application.
 
-Codex execution uses `codex exec --sandbox read-only --ephemeral --output-schema ...`. Repository context is off by default and paths must be within `MC_REPOSITORY_ROOTS`.
+SQLite compatibility mode remains available:
+
+```bash
+make dev-sqlite
+```
+
+## Codex authentication in Docker
+
+After `codex-worker` is running:
+
+```bash
+make codex-login
+# equivalent:
+docker compose exec codex-worker codex login --device-auth
+```
+
+Verify without displaying credentials:
+
+```bash
+docker compose exec codex-worker codex login status
+```
+
+Authentication is stored only in the `codex-auth` named volume. It is not mounted into backend, frontend, STT, TTS, PostgreSQL, or Redis. Do not use `docker compose down -v` unless authentication and all persistent data should be deleted.
+
+Codex runs with `--sandbox read-only --ephemeral --output-schema`. Repository context remains disabled unless a read-only volume and allowlisted container path are explicitly added through a Compose override.
 
 ## STT and TTS
 
-Default STT: `large-v3-turbo`, CUDA, float16, VAD, Chinese with English terms. Configure in `.env` or Providers:
+The `stt-worker` reserves one NVIDIA GPU and loads faster-whisper once:
 
 ```dotenv
 MC_STT_MODEL=large-v3-turbo
@@ -45,28 +76,42 @@ MC_STT_COMPUTE_TYPE=float16
 MC_STT_FALLBACK_MODEL=medium
 ```
 
-Run `make benchmark-stt` to test model loading, or `PYTHONPATH=backend:.python-packages python3 scripts/benchmark_stt.py fixture.wav` for real-time factor and a five-minute stability loop. Results are written to `runtime/stt-benchmark.json`.
+Models persist in the `model-cache` volume. Run the in-container benchmark with `make benchmark-stt`.
 
-Browser SpeechSynthesis is the default TTS adapter. Select voice, rate, and volume under Settings, then use **Speak** on a non-ignored suggestion. HTTP TTS endpoints can be registered under Providers; automatic speech is disabled.
+Browser SpeechSynthesis remains available. The authenticated `tts-worker` supplies local `espeak-ng` synthesis and starts with the standard Compose stack.
 
-## Database and tests
+## Database, tests, and operations
+
+PostgreSQL and Redis start by default. PostgreSQL credentials and the internal worker token are generated files, mounted as Docker secrets, and never returned by APIs.
 
 ```bash
 make migrate
 make test
 make lint
 make smoke-test
+make down
 ```
 
-SQLite data is stored in `runtime/meeting-copilot.db`. Production profiles are available with `docker compose --profile production up`; set `MC_DATABASE_URL` and `MC_REDIS_URL` explicitly.
+Useful diagnostics:
 
-## Troubleshooting
+```bash
+docker compose ps
+docker compose logs -f backend stt-worker codex-worker
+docker compose exec postgres pg_isready -U meeting -d meeting_copilot
+docker compose exec redis redis-cli ping
+```
 
-- `ensurepip is not available`: install `python3-venv`, or rerun `make setup` to use `.python-packages`.
-- `nvidia-smi` fails: install the NVIDIA driver and container toolkit; STT explicitly falls back to `medium` CPU int8.
-- Codex shows unauthenticated: run `codex login status`, then `codex login --device-auth` as the same OS user running the backend.
-- Microphone denied: use localhost/HTTPS, allow browser permission, and rerun Setup > Microphone.
-- No transcript: verify FFmpeg, STT model access, GPU memory, and Diagnostics events.
-- A stale active meeting becomes `interrupted` at backend restart and can be resumed.
+See [configuration](docs/configuration.md), [Codex authentication](docs/codex-auth.md), [security](docs/security.md), and [operations](docs/operations.md).
 
-See [configuration](docs/configuration.md), [security](docs/security.md), and [operations](docs/operations.md).
+## Implemented workflows
+
+- Project dashboards with meeting history, glossary, and versioned project memory.
+- Realtime microphone streaming, faster-whisper transcription, Codex analysis, rolling state, and local TTS.
+- Meeting completion summaries plus Markdown, JSON, PDF, VTT, and SRT exports.
+- Immutable decision history with confirmation, rejection, superseding versions, search, and filters.
+- Action tracking by owner, project, meeting, status, due date, and priority.
+- Cross-source knowledge search over meetings, transcripts, decisions, risks, questions, actions, project memory, and uploaded text documents.
+- Independent UI, meeting input, secondary input, transcript display, translation, suggestion, summary, export, and TTS languages for Traditional Chinese, Simplified Chinese, English, Japanese, and Korean.
+- Optional Codex translation stored beside the original transcript, with project glossary spelling and do-not-translate enforcement.
+
+The web application exposes these as `/projects`, `/decisions`, `/actions`, `/knowledge`, `/meetings`, and `/history`; every workflow uses persisted API data.

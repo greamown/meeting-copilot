@@ -1,5 +1,13 @@
 # Codex authentication
 
-Authentication belongs to the OS user running the backend. Use `codex login --device-auth`, the Setup wizard device flow, or an environment-backed custom provider. Never mount or copy credential JSON into this repository.
+Codex CLI and authentication live entirely inside `codex-worker`.
 
-Status calls use `codex login status`. Sanitized status and errors are visible in Setup and Diagnostics; tokens and raw credential files are never exposed.
+```bash
+make dev
+make codex-login
+docker compose exec codex-worker codex login status
+```
+
+Device authentication persists in the `codex_home` named volume. Other containers cannot mount this volume. Setup and Diagnostics receive only sanitized status from the worker API; credential files and token values are never returned.
+
+For a custom OpenAI-compatible Codex provider, inject its secret into `codex-worker` with a Compose secret or environment reference and configure the provider inside the persistent Codex home. Do not inject Codex credentials into `meeting-web` or `meeting-api`.

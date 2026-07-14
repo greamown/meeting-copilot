@@ -1,10 +1,51 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["job_id", "meeting_id", "job_type", "meeting", "recent_transcript", "recent_suggestions", "manual_question", "repository_context"],
+  "additionalProperties": false,
+  "required": [
+    "job_id", "meeting_id", "project_id", "job_type", "language", "meeting",
+    "project_memory", "glossary", "knowledge_context", "recent_transcript",
+    "recent_suggestions", "manual_question", "review_roles", "repository_context"
+  ],
   "properties": {
-    "job_id": {"type": "string"}, "meeting_id": {"type": "string"}, "job_type": {"type": "string"},
-    "meeting": {"type": "object"}, "recent_transcript": {"type": "array"}, "recent_suggestions": {"type": "array"},
-    "manual_question": {"type": ["string", "null"]}, "repository_context": {"type": "object"}
+    "job_id": {"type": "string"},
+    "meeting_id": {"type": "string"},
+    "project_id": {"type": ["string", "null"]},
+    "job_type": {"type": "string"},
+    "language": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input", "secondary", "output", "summary", "translation", "analysis_mode"],
+      "properties": {
+        "input": {"type": "string"}, "secondary": {"type": "string"},
+        "output": {"type": "string"}, "summary": {"type": "string"},
+        "translation": {"type": "string"},
+        "analysis_mode": {"enum": ["original", "translated", "both"]}
+      }
+    },
+    "meeting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "goal", "current_topic", "decisions", "open_questions", "risks", "action_items"],
+      "properties": {
+        "title": {"type": "string"}, "goal": {"type": "string"},
+        "current_topic": {"type": "string"}, "decisions": {"type": "array"},
+        "open_questions": {"type": "array"}, "risks": {"type": "array"},
+        "action_items": {"type": "array"}
+      }
+    },
+    "project_memory": {"type": "array", "maxItems": 40},
+    "glossary": {"type": "array", "maxItems": 100},
+    "knowledge_context": {"type": "array", "maxItems": 20},
+    "recent_transcript": {"type": "array", "maxItems": 500},
+    "recent_suggestions": {"type": "array", "maxItems": 20},
+    "manual_question": {"type": ["string", "null"], "maxLength": 4000},
+    "review_roles": {"type": "array", "maxItems": 20},
+    "repository_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "path"],
+      "properties": {"enabled": {"type": "boolean"}, "path": {"type": ["string", "null"]}}
+    }
   }
 }
