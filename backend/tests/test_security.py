@@ -8,7 +8,10 @@ from app.core.security import allowlisted_path, redact, scrub_mapping
 def test_redaction():
     assert "supersecret" not in redact("Authorization: Bearer supersecret")
     assert "abc1234567890" not in redact("api_key=abc1234567890")
-    assert scrub_mapping({"access_token": "raw", "safe": "value"}) == {"access_token": "[REDACTED]", "safe": "value"}
+    assert scrub_mapping({"access_token": "raw", "safe": "value"}) == {
+        "access_token": "[REDACTED]",
+        "safe": "value",
+    }
 
 
 def test_repository_path_allowlist(tmp_path: Path):

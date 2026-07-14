@@ -4,7 +4,9 @@ from typing import Any
 
 SECRET_PATTERNS = [
     re.compile(r"(?i)(authorization\s*[:=]\s*(?:bearer\s+)?)[^\s,;]+"),
-    re.compile(r"(?i)((?:api[_-]?key|access[_-]?token|refresh[_-]?token|cookie)\s*[:=]\s*)[^\s,;]+"),
+    re.compile(
+        r"(?i)((?:api[_-]?key|access[_-]?token|refresh[_-]?token|cookie)\s*[:=]\s*)[^\s,;]+"
+    ),
     re.compile(r"\b(?:sk|sess)-[A-Za-z0-9_-]{12,}\b"),
 ]
 
@@ -13,7 +15,10 @@ def redact(value: str) -> str:
     """Remove credentials from text before persistence or API output."""
     sanitized = value
     for pattern in SECRET_PATTERNS:
-        sanitized = pattern.sub(lambda match: f"{match.group(1)}[REDACTED]" if match.lastindex else "[REDACTED]", sanitized)
+        sanitized = pattern.sub(
+            lambda match: f"{match.group(1)}[REDACTED]" if match.lastindex else "[REDACTED]",
+            sanitized,
+        )
     return sanitized[:8000]
 
 
@@ -34,7 +39,12 @@ def allowlisted_path(raw_path: str, roots: list[Path]) -> Path:
 def scrub_mapping(value: Any) -> Any:
     if isinstance(value, dict):
         return {
-            key: "[REDACTED]" if any(token in key.lower() for token in ("key", "token", "secret", "cookie", "authorization")) else scrub_mapping(item)
+            key: "[REDACTED]"
+            if any(
+                token in key.lower()
+                for token in ("key", "token", "secret", "cookie", "authorization")
+            )
+            else scrub_mapping(item)
             for key, item in value.items()
         }
     if isinstance(value, list):
