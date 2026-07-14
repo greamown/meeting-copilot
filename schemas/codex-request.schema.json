@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["job_id", "meeting_id", "job_type", "meeting", "recent_transcript", "recent_suggestions", "manual_question", "repository_context"],
+  "properties": {
+    "job_id": {"type": "string"}, "meeting_id": {"type": "string"}, "job_type": {"type": "string"},
+    "meeting": {"type": "object"}, "recent_transcript": {"type": "array"}, "recent_suggestions": {"type": "array"},
+    "manual_question": {"type": ["string", "null"]}, "repository_context": {"type": "object"}
+  }
+}

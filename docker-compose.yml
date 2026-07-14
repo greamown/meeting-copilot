@@ -1,0 +1,29 @@
+services:
+  backend:
+    build: {context: ., dockerfile: backend/Dockerfile}
+    environment:
+      MC_DATABASE_URL: ${MC_DATABASE_URL:-sqlite+aiosqlite:////app/runtime/meeting-copilot.db}
+      MC_ALLOWED_ORIGINS: http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:8080
+    volumes: ["./runtime:/app/runtime"]
+    ports: ["127.0.0.1:8000:8000"]
+  frontend:
+    build: {context: ., dockerfile: frontend/Dockerfile}
+    depends_on: [backend]
+    ports: ["127.0.0.1:8080:80"]
+  stt-worker:
+    profiles: ["gpu"]
+    build: {context: ., dockerfile: backend/Dockerfile}
+    command: ["python", "-c", "from faster_whisper import WhisperModel; WhisperModel('large-v3-turbo', device='cuda', compute_type='float16'); import time; time.sleep(1000000)"]
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]}}}
+    volumes: ["whisper-cache:/root/.cache/huggingface"]
+  postgres:
+    profiles: ["production"]
+    image: postgres:17-alpine
+    environment: {POSTGRES_USER: meeting, POSTGRES_PASSWORD: meeting-local-only, POSTGRES_DB: meeting_copilot}
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
+  redis:
+    profiles: ["production"]
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: ["redis-data:/data"]
+volumes: {whisper-cache: {}, postgres-data: {}, redis-data: {}}
