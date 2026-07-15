@@ -23,7 +23,7 @@ services:
       - "${HOST_GID:-1000}"
     ports:
       - "0.0.0.0:80:8080"
-      - "0.0.0.0:443:8443"
+      - "0.0.0.0:8443:8443"
     volumes:
       - ./runtime/tls:/etc/nginx/tls:ro
     tmpfs:
@@ -64,10 +64,10 @@ services:
       SERVICE_HOME: /home/meeting
       SERVICE_USER: meeting
       SERVICE_WRITABLE_PATHS: /app/runtime:/app/runtime/audio
-      MC_ALLOWED_ORIGINS: https://127.0.0.1,https://localhost,https://10.110.51.105
+      MC_ALLOWED_ORIGINS: https://127.0.0.1:8443,https://localhost:8443,https://10.110.51.105:8443
       MC_REDIS_URL: redis://redis:6379/0
       MC_STT_WORKER_URL: http://stt-worker:8001
-      MC_CODEX_WORKER_URL: http://codex-worker:8002
+      MC_CLI_WORKER_URL: http://cli-worker:8002
       MC_TTS_WORKER_URL: http://tts-worker:8003
       MC_WORKER_TOKEN_FILE: /run/secrets/worker_token
       MC_RUNTIME_DIR: /app/runtime
@@ -87,7 +87,7 @@ services:
         condition: service_healthy
       stt-worker:
         condition: service_healthy
-      codex-worker:
+      cli-worker:
         condition: service_healthy
       tts-worker:
         condition: service_healthy
@@ -139,18 +139,19 @@ services:
       retries: 40
       start_period: 10m
 
-  codex-worker:
+  cli-worker:
     <<: *service-security
     build:
       context: .
-      dockerfile: backend/Dockerfile.codex
+      dockerfile: backend/Dockerfile.worker
     environment:
       SERVICE_UID: "10002"
       SERVICE_GID: "10002"
       SERVICE_HOME: /home/codex
       SERVICE_USER: codex
-      SERVICE_WRITABLE_PATHS: /home/codex/.codex:/app/runtime
+      SERVICE_WRITABLE_PATHS: /home/codex/.codex:/home/codex/.claude:/app/runtime
       MC_CODEX_BIN: codex
+      MC_CLAUDE_BIN: claude
       MC_WORKER_TOKEN_FILE: /run/secrets/worker_token
       MC_RUNTIME_DIR: /app/runtime
       MC_REDIS_URL: redis://redis:6379/0
@@ -159,7 +160,8 @@ services:
     cap_add: [CHOWN, DAC_OVERRIDE, SETGID, SETUID]
     volumes:
       - codex-auth:/home/codex/.codex
-      - codex-runtime:/app/runtime
+      - claude-auth:/home/codex/.claude
+      - cli-runtime:/app/runtime
     networks: [worker-egress, app-internal]
     tmpfs:
       - /tmp
@@ -253,7 +255,8 @@ volumes:
   postgres-data:
   redis-data:
   codex-auth:
-  codex-runtime:
+  claude-auth:
+  cli-runtime:
   meeting-data:
   audio-data:
   model-cache:
