@@ -4,7 +4,7 @@ import { useI18n } from "../i18n";
 
 const nav = [
   ["/", "dashboard", LayoutDashboard], ["/setup", "setup", RadioTower], ["/providers", "providers", SlidersHorizontal],
-  ["/codex", "codex", KeyRound],
+  ["/cli-auth", "cliAuth", KeyRound],
   ["/projects", "projects", FolderKanban],
   ["/decisions", "decisions", GitCompare], ["/actions", "actions", ListTodo], ["/knowledge", "knowledge", BookOpen],
   ["/meetings", "meetings", AudioLines], ["/history", "history", History], ["/diagnostics", "diagnostics", Stethoscope], ["/settings", "settings", Settings],

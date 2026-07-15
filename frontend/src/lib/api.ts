@@ -26,6 +26,7 @@ export async function api<T>(path: string, schema: z.ZodType<T>, init?: RequestI
   const method=(init?.method??"GET").toUpperCase();const csrf=!["GET","HEAD","OPTIONS"].includes(method)?csrfToken():undefined;
   const response = await fetch(`/api${path}`, { ...init, credentials:"same-origin", headers: { "Content-Type": "application/json", ...(csrf?{"X-CSRF-Token":csrf}:{}), ...init?.headers } });
   if (!response.ok) throw new Error((await response.json().catch(() => null))?.detail ?? `HTTP ${response.status}`);
+  if (response.status === 204) return undefined as T;
   return schema.parse(await response.json());
 }
 
@@ -85,6 +86,8 @@ export const getMeeting = (id:string):Promise<MeetingDetail> => request(`/meetin
 export const getSettings = ():Promise<SettingsData> => request("/settings");
 export const getCodexStatus = ():Promise<CodexStatus> => request("/codex/status");
 export const getCodexLoginStatus = ():Promise<CodexLoginStatus> => request("/codex/login/status");
+export const getClaudeStatus = ():Promise<CodexStatus> => request("/claude/status");
+export const getClaudeLoginStatus = ():Promise<CodexLoginStatus> => request("/claude/login/status");
 export const getProjects = ():Promise<Project[]> => request("/projects");
 export const getProject = (id:string):Promise<ProjectDetail> => request(`/projects/${id}`);
 export const getProjectGlossary = (id:string):Promise<GlossaryEntry[]> => request(`/projects/${id}/glossary`);

@@ -8,7 +8,7 @@ import { LiveMeeting } from "./pages/LiveMeeting";
 import { History, HistoryDetail } from "./pages/History";
 import { Diagnostics } from "./pages/Diagnostics";
 import { Settings } from "./pages/Settings";
-import { CodexAuth } from "./pages/CodexAuth";
+import { CliAuth } from "./pages/CliAuth";
 import { ProjectDashboard, Projects } from "./pages/Projects";
 import { Actions, Decisions, Knowledge } from "./pages/KnowledgeWork";
 import { AuthGate } from "./components/AuthGate";
@@ -17,7 +17,7 @@ import { Access } from "./pages/Access";
 export function App() { return <Routes><Route element={<AuthGate><Layout/></AuthGate>}>
   <Route index element={localStorage.getItem("meeting-copilot-setup") ? <Dashboard/> : <Navigate to="/setup" replace/>}/>
   <Route path="setup" element={<Setup/>}/><Route path="providers" element={<Providers/>}/>
-  <Route path="codex" element={<CodexAuth/>}/>
+  <Route path="cli-auth" element={<CliAuth/>}/>
   <Route path="projects" element={<Projects/>}/><Route path="projects/:id" element={<ProjectDashboard/>}/>
   <Route path="decisions" element={<Decisions/>}/><Route path="actions" element={<Actions/>}/><Route path="knowledge" element={<Knowledge/>}/>
   <Route path="meetings" element={<MeetingPrep/>}/><Route path="meetings/new" element={<MeetingPrep/>}/><Route path="meetings/:id" element={<LiveMeeting/>}/>

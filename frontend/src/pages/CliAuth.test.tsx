@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
-import { CodexAuth } from "./CodexAuth";
+import { CliAuth } from "./CliAuth";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
@@ -15,8 +15,8 @@ beforeEach(() => {
 
 test("shows the device login instructions returned by the worker", async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(<QueryClientProvider client={client}><CodexAuth /></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><CliAuth /></QueryClientProvider>);
   expect(await screen.findByText(/ABCD-EFGH/)).toBeInTheDocument();
-  expect(screen.getByText(/尚未登入。請完成裝置登入頁/)).toBeInTheDocument();
+  expect(screen.getByText(/尚未登入。請完成登入頁/)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "測試 Codex" })).toBeDisabled();
 });
