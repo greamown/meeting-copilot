@@ -5,7 +5,7 @@ The deployment is fully containerized:
 ```text
 Browser -> reverse-proxy (HTTPS) -> meeting-web -> meeting-api -> PostgreSQL / Redis
                                   |-> stt-worker (A6000)
-                                  |-> codex-worker (Codex CLI)
+                                  |-> cli-worker (Codex CLI)
                                   `-> optional-tts-worker
 ```
 

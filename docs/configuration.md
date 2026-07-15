@@ -4,7 +4,7 @@ Compose configures internal service discovery:
 
 ```text
 MC_STT_WORKER_URL=http://stt-worker:8001
-MC_CODEX_WORKER_URL=http://codex-worker:8002
+MC_CLI_WORKER_URL=http://cli-worker:8002
 MC_TTS_WORKER_URL=http://optional-tts-worker:8003
 MC_REDIS_URL=redis://redis:6379/0
 ```
