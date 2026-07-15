@@ -16,6 +16,7 @@ class ProviderBase(BaseModel):
     role: Literal["reasoning", "stt", "tts", "embedding", "reranker"]
     provider_type: Literal[
         "codex_cli",
+        "claude_code",
         "local_faster_whisper",
         "openai_compatible_stt",
         "browser_speech_synthesis",

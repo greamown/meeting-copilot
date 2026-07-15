@@ -17,9 +17,9 @@ from redis.asyncio import Redis
 from app.core.config import get_settings
 from app.core.security import redact, scrub_mapping
 from app.core.worker_auth import require_worker_token
-from app.schemas.meeting import CodexOutput
-from app.services.codex import AGENT_INSTRUCTIONS
-from app.services.system import run_command
+from app.schemas.meeting import EngineOutput
+from app.services.engine import AGENT_INSTRUCTIONS, build_cli_command, extract_claude_result
+from app.services.system import claude_status, run_command
 
 settings = get_settings()
 locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
@@ -34,13 +34,14 @@ class ExecuteRequest(BaseModel):
     run_id: str
     meeting_id: str
     request: dict[str, Any]
+    engine: str = "codex"
     profile: str | None = None
     model: str | None = None
     timeout_seconds: int = Field(default=180, ge=1, le=900)
 
 
 class ExecuteResponse(BaseModel):
-    result: CodexOutput
+    result: EngineOutput
     retry_count: int
     duration_ms: int
 
@@ -127,35 +128,27 @@ async def meeting_lock(meeting_id: str, timeout_seconds: int) -> AsyncIterator[N
 
 
 def command_for(payload: ExecuteRequest, runtime: Path, output: Path) -> list[str]:
-    schema = Path("/app/schemas/codex-response.schema.json")
-    command = [
-        settings.codex_bin,
-        "exec",
-        "--sandbox",
-        "read-only",
-        "--ephemeral",
-        "--skip-git-repo-check",
-        "--output-schema",
-        str(schema),
-        "--output-last-message",
-        str(output),
-        "--color",
-        "never",
-        "-C",
-        str(runtime),
-    ]
-    if payload.model:
-        command.extend(["--model", payload.model])
-    if payload.profile:
-        command.extend(["--profile", payload.profile])
-    return command
+    schema = Path("/app/schemas/engine-response.schema.json")
+    return build_cli_command(
+        payload.engine, payload.model, payload.profile, settings, runtime, schema, output
+    )
 
 
 async def invoke(
-    payload: ExecuteRequest, command: list[str], prompt: str, output: Path, timeout: int
+    payload: ExecuteRequest,
+    command: list[str],
+    prompt: str,
+    output: Path,
+    runtime: Path,
+    timeout: int,
 ) -> str:
     process = await asyncio.create_subprocess_exec(
-        *command, prompt, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        *command,
+        prompt,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=str(runtime),
     )
     processes[payload.run_id] = process
     try:
@@ -163,13 +156,15 @@ async def invoke(
     except TimeoutError:
         if process.returncode is None:
             process.kill()
-        raise HTTPException(504, "Codex execution timed out") from None
+        raise HTTPException(504, "Reasoning engine timed out") from None
     finally:
         processes.pop(payload.run_id, None)
     if process.returncode != 0:
         raise HTTPException(
             502, redact(stderr.decode(errors="replace") or stdout.decode(errors="replace"))
         )
+    if payload.engine == "claude":
+        return extract_claude_result(stdout.decode(errors="replace"))
     return output.read_text() if output.exists() else stdout.decode(errors="replace")
 
 
@@ -185,7 +180,9 @@ async def health() -> dict[str, object]:
 
 
 @app.get("/v1/status", dependencies=[Depends(require_worker_token)])
-async def status() -> dict[str, object]:
+async def status(engine: str = "codex") -> dict[str, object]:
+    if engine == "claude":
+        return await claude_status(settings)
     path = shutil.which(settings.codex_bin)
     if not path:
         return {
@@ -218,6 +215,7 @@ async def execute(payload: ExecuteRequest) -> ExecuteResponse:
         runs = runtime / "runs"
         runs.mkdir(parents=True, exist_ok=True)
         runtime.joinpath("AGENTS.md").write_text(AGENT_INSTRUCTIONS)
+        runtime.joinpath("CLAUDE.md").write_text(AGENT_INSTRUCTIONS)
         runtime.joinpath("request.json").write_text(
             json.dumps(scrub_mapping(payload.request), ensure_ascii=False, indent=2)
         )
@@ -228,11 +226,16 @@ async def execute(payload: ExecuteRequest) -> ExecuteResponse:
         )
         started = perf_counter()
         raw = await invoke(
-            payload, command_for(payload, runtime, output), prompt, output, payload.timeout_seconds
+            payload,
+            command_for(payload, runtime, output),
+            prompt,
+            output,
+            runtime,
+            payload.timeout_seconds,
         )
         retry_count = 0
         try:
-            result = CodexOutput.model_validate_json(raw)
+            result = EngineOutput.model_validate_json(raw)
         except ValidationError:
             retry_count = 1
             repair_output = runs / f"{payload.run_id}-repair.json"
@@ -245,10 +248,11 @@ async def execute(payload: ExecuteRequest) -> ExecuteResponse:
                 command_for(payload, runtime, repair_output),
                 repair_prompt,
                 repair_output,
+                runtime,
                 min(60, payload.timeout_seconds),
             )
             try:
-                result = CodexOutput.model_validate_json(repaired)
+                result = EngineOutput.model_validate_json(repaired)
             except ValidationError as exc:
                 raise HTTPException(
                     422, "Codex returned invalid JSON after one repair attempt"
@@ -284,15 +288,20 @@ async def cancel(run_id: str) -> dict[str, bool]:
 
 
 @app.post("/v1/login/start", dependencies=[Depends(require_worker_token)])
-async def login_start() -> dict[str, object]:
+async def login_start(engine: str = "codex") -> dict[str, object]:
     global login_process, login_reader_task
     if login_process and login_process.returncode is None:
         return login_snapshot()
     login_output.clear()
+    # ponytail: single login slot shared by both engines — one sign-in at a time.
+    login_cmd = (
+        [settings.claude_bin, "auth", "login", "--claudeai"]
+        if engine == "claude"
+        else [settings.codex_bin, "login", "--device-auth"]
+    )
     login_process = await asyncio.create_subprocess_exec(
-        settings.codex_bin,
-        "login",
-        "--device-auth",
+        *login_cmd,
+        stdin=asyncio.subprocess.PIPE,  # claude OAuth prompts "Paste code here" on stdin
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
@@ -309,6 +318,19 @@ async def login_status() -> dict[str, object]:
     return login_snapshot()
 
 
+class LoginCode(BaseModel):
+    code: str = Field(min_length=1, max_length=2000)
+
+
+@app.post("/v1/login/submit", dependencies=[Depends(require_worker_token)])
+async def login_submit(payload: LoginCode) -> dict[str, bool]:
+    if not (login_process and login_process.returncode is None and login_process.stdin):
+        return {"submitted": False}
+    login_process.stdin.write((payload.code.strip() + "\n").encode())
+    await login_process.stdin.drain()
+    return {"submitted": True}
+
+
 @app.post("/v1/login/cancel", dependencies=[Depends(require_worker_token)])
 async def login_cancel() -> dict[str, bool]:
     global login_process
@@ -322,15 +344,22 @@ async def login_cancel() -> dict[str, bool]:
 
 
 @app.post("/v1/logout", dependencies=[Depends(require_worker_token)])
-async def logout() -> dict[str, bool]:
-    code, _, _ = await run_command([settings.codex_bin, "logout"])
+async def logout(engine: str = "codex") -> dict[str, bool]:
+    cmd = (
+        [settings.claude_bin, "auth", "logout"]
+        if engine == "claude"
+        else [settings.codex_bin, "logout"]
+    )
+    code, _, _ = await run_command(cmd)
     return {"logged_out": code == 0}
 
 
 @app.post("/v1/test", dependencies=[Depends(require_worker_token)])
-async def test() -> dict[str, object]:
-    code, output, error = await run_command(
-        [
+async def test(engine: str = "codex") -> dict[str, object]:
+    test_cmd = (
+        [settings.claude_bin, "-p", 'Return exactly: {"ok":true}', "--output-format", "json"]
+        if engine == "claude"
+        else [
             settings.codex_bin,
             "exec",
             "--sandbox",
@@ -338,9 +367,9 @@ async def test() -> dict[str, object]:
             "--ephemeral",
             "--skip-git-repo-check",
             'Return exactly: {"ok":true}',
-        ],
-        timeout=30,
+        ]
     )
+    code, output, error = await run_command(test_cmd, timeout=30)
     return {
         "healthy": code == 0,
         "output": clean_cli_output(output[-1000:]),

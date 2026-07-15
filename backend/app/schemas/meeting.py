@@ -25,6 +25,7 @@ class MeetingCreate(BaseModel):
     stt_provider_id: str | None = None
     tts_provider_id: str | None = None
     codex_profile: str | None = None
+    analysis_engine: Literal["codex", "claude"] | None = None  # None → global default
     automatic_analysis_enabled: bool = True
     analysis_interval_seconds: int = Field(default=120, ge=30, le=3600)
     suggestion_cooldown_seconds: int = Field(default=180, ge=0, le=3600)
@@ -136,7 +137,7 @@ SuggestionCategory = Literal[
 ]
 
 
-class CodexOutput(BaseModel):
+class EngineOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     should_suggest: bool
     confidence: float = Field(ge=0, le=1)
@@ -213,6 +214,6 @@ class CommandResponse(BaseModel):
     meeting: MeetingRead
 
 
-class CodexRunResponse(BaseModel):
+class EngineRunResponse(BaseModel):
     run_id: str
     status: str

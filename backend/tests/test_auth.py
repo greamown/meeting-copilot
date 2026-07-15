@@ -6,6 +6,14 @@ from sqlalchemy import select
 from app.db.base import AuthCredential, AuthSession
 from app.db.session import SessionLocal
 from app.main import app
+from app.services.auth import websocket_origin_allowed
+
+
+def test_websocket_origin_accepts_same_host_and_rejects_other_hosts():
+    allowed = ["https://localhost:8443"]
+    assert websocket_origin_allowed("https://172.22.12.148:8443", "172.22.12.148:8443", allowed)
+    assert websocket_origin_allowed("https://localhost:8443", "backend:8000", allowed)
+    assert not websocket_origin_allowed("https://attacker.example", "172.22.12.148:8443", allowed)
 
 
 async def test_remote_authentication_and_csrf(client, monkeypatch):

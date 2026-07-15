@@ -2,6 +2,7 @@ import hashlib
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 
 from fastapi import Request, WebSocket
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +26,20 @@ def is_remote_host(host: str | None) -> bool:
 
 def remote_auth_applies(host: str | None, settings: Settings) -> bool:
     return settings.remote_auth_required and is_remote_host(host)
+
+
+def websocket_origin_allowed(
+    origin: str | None, host: str | None, allowed_origins: list[str]
+) -> bool:
+    if not origin or origin in allowed_origins:
+        return True
+    parsed = urlsplit(origin)
+    return (
+        parsed.scheme in {"http", "https"}
+        and not parsed.username
+        and not parsed.password
+        and parsed.netloc.lower() == (host or "").lower()
+    )
 
 
 @dataclass(frozen=True)

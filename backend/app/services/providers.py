@@ -5,7 +5,7 @@ import httpx
 
 from app.core.config import Settings
 from app.db.base import ModelProvider
-from app.services.system import codex_status
+from app.services.system import claude_status, codex_status
 
 
 def worker_base_url(value: str) -> str:
@@ -18,6 +18,10 @@ async def test_provider(provider: ModelProvider, settings: Settings) -> dict[str
         result = await codex_status(settings)
         healthy = bool(result["installed"])
         detail = "Codex CLI available" if healthy else result.get("error", "Unavailable")
+    elif provider.provider_type == "claude_code":
+        result = await claude_status(settings)
+        healthy = bool(result["installed"])
+        detail = "Claude Code available" if healthy else result.get("error", "Unavailable")
     elif provider.provider_type in ("local_faster_whisper", "browser_speech_synthesis"):
         healthy, detail = True, "Local adapter configured"
     elif (

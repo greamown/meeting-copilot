@@ -28,7 +28,7 @@ from app.db.base import (
     Suggestion,
     TranscriptSegment,
 )
-from app.schemas.meeting import CodexOutput
+from app.schemas.meeting import EngineOutput
 from app.services.events import emit
 from app.services.glossary import normalize_translation
 from app.services.trigger import similar
@@ -197,7 +197,77 @@ async def get_project_context(
     return memory, glossary, knowledge
 
 
-class CodexManager:
+def engine_of(provider: str | None) -> str:
+    """Map a CodexRun.provider marker to the engine name."""
+    return "claude" if provider == "claude_code" else "codex"
+
+
+def build_cli_command(
+    engine: str,
+    model: str | None,
+    profile: str | None,
+    settings: Settings,
+    runtime: Path,
+    schema_path: Path,
+    out_path: Path,
+) -> list[str]:
+    """Command for codex/claude. Shared by the in-process manager and the cli-worker."""
+    if engine == "claude":
+        # ponytail: repo file-reads aren't sandbox-fenced like codex --sandbox read-only;
+        # non-interactive `claude -p` denies edits by default, so worst case is a denied tool,
+        # not a write. Tighten with --permission-mode if that ever matters.
+        # claude --json-schema wants the schema inline, and rejects the draft-2020-12 $schema ref.
+        schema = json.loads(schema_path.read_text())
+        schema.pop("$schema", None)
+        command = [
+            settings.claude_bin,
+            "-p",
+            "--output-format",
+            "json",
+            "--json-schema",
+            json.dumps(schema),
+            "--add-dir",
+            str(runtime),
+        ]
+        model = model or settings.claude_model
+        if model:
+            command.extend(["--model", model])
+        return command
+    command = [
+        settings.codex_bin,
+        "exec",
+        "--sandbox",
+        "read-only",
+        "--ephemeral",
+        "--skip-git-repo-check",
+        "--output-schema",
+        str(schema_path),
+        "--output-last-message",
+        str(out_path),
+        "--color",
+        "never",
+        "-C",
+        str(runtime),
+    ]
+    if model:
+        command.extend(["--model", model])
+    if profile:
+        command.extend(["--profile", profile])
+    return command
+
+
+def extract_claude_result(stdout: str) -> str:
+    """Claude Code prints a JSON envelope on stdout; the structured answer is in `result`."""
+    envelope = json.loads(stdout or "{}")
+    if envelope.get("is_error") or envelope.get("subtype") not in (None, "success"):
+        raise RuntimeError(str(envelope.get("result") or "Claude Code returned an error"))
+    result = envelope.get("result")
+    if result is None:
+        raise RuntimeError("Claude Code returned no result")
+    return result if isinstance(result, str) else json.dumps(result)
+
+
+class EngineManager:
     """Serializes Codex per meeting and tracks cancellable subprocesses."""
 
     def __init__(self) -> None:
@@ -260,14 +330,14 @@ class CodexManager:
                 pass
 
     async def cancel(self, run_id: str, settings: Settings | None = None) -> bool:
-        if settings and settings.codex_worker_url:
+        if settings and settings.cli_worker_url:
             token = settings.worker_token()
             if not token:
                 return False
             try:
                 async with httpx.AsyncClient(timeout=10) as client:
                     response = await client.post(
-                        f"{settings.codex_worker_url.rstrip('/')}/v1/jobs/{run_id}/cancel",
+                        f"{settings.cli_worker_url.rstrip('/')}/v1/jobs/{run_id}/cancel",
                         headers={"X-Worker-Token": token},
                     )
                 cancelled = response.is_success and bool(response.json().get("cancelled"))
@@ -309,6 +379,41 @@ class CodexManager:
                 return
             await self._execute(db, run, settings)
 
+    async def _invoke_cli(
+        self,
+        run: CodexRun,
+        settings: Settings,
+        runtime: Path,
+        schema_path: Path,
+        prompt: str,
+        out_path: Path,
+        timeout: float,
+    ) -> str:
+        """Run codex/claude once and return the raw JSON text (empty string if cancelled)."""
+        engine = engine_of(run.provider)
+        command = build_cli_command(
+            engine, run.model, run.profile, settings, runtime, schema_path, out_path
+        )
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            prompt,
+            stdin=asyncio.subprocess.DEVNULL,  # claude -p otherwise waits ~3s for stdin
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(runtime),
+        )
+        self._processes[run.id] = process
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
+        if run.status == "cancelled" or run.id in self._cancelled_runs:
+            return ""
+        if process.returncode != 0:
+            raise RuntimeError(
+                redact(stderr.decode(errors="replace") or stdout.decode(errors="replace"))
+            )
+        if engine == "claude":
+            return extract_claude_result(stdout.decode(errors="replace"))
+        return out_path.read_text() if out_path.exists() else stdout.decode(errors="replace")
+
     async def _execute(self, db: AsyncSession, run: CodexRun, settings: Settings) -> None:
         meeting = await db.get(Meeting, run.meeting_id)
         if not meeting:
@@ -316,106 +421,53 @@ class CodexManager:
         runtime = settings.runtime_dir / "meetings" / meeting.id
         runs_dir = runtime / "runs"
         runs_dir.mkdir(parents=True, exist_ok=True)
-        schema_path = Path(__file__).resolve().parents[3] / "schemas" / "codex-response.schema.json"
+        schema_path = Path(__file__).resolve().parents[3] / "schemas" / "engine-response.schema.json"
         output_path = runs_dir / f"{run.id}-response.json"
         request_path = runs_dir / f"{run.id}-request.json"
-        runtime.joinpath("AGENTS.md").write_text(AGENT_INSTRUCTIONS)
+        runtime.joinpath("AGENTS.md").write_text(AGENT_INSTRUCTIONS)  # codex reads AGENTS.md
+        runtime.joinpath("CLAUDE.md").write_text(AGENT_INSTRUCTIONS)  # claude reads CLAUDE.md
         request_path.write_text(
             json.dumps(scrub_mapping(run.request_json), ensure_ascii=False, indent=2)
         )
         run.status, run.started_at = "running", datetime.now(UTC)
-        await emit(db, meeting.id, "codex.started", "codex-worker", {"run_id": run.id})
+        await emit(db, meeting.id, "codex.started", "cli-worker", {"run_id": run.id})
         await db.commit()
         started = perf_counter()
         try:
             if run.id in self._cancelled_runs:
                 return
-            if settings.codex_worker_url:
+            if settings.cli_worker_url:
+                # The cli-worker runs both engines (payload carries engine); see _remote_execute.
                 result = await self._remote_execute(run, settings)
             else:
-                command = [
-                    settings.codex_bin,
-                    "exec",
-                    "--sandbox",
-                    "read-only",
-                    "--ephemeral",
-                    "--skip-git-repo-check",
-                    "--output-schema",
-                    str(schema_path),
-                    "--output-last-message",
-                    str(output_path),
-                    "--color",
-                    "never",
-                    "-C",
-                    str(runtime),
-                ]
-                if run.model:
-                    command.extend(["--model", run.model])
-                if run.profile:
-                    command.extend(["--profile", run.profile])
                 prompt = (
                     "Analyze the meeting request in this JSON and return only the required "
                     "structured result:\n" + json.dumps(run.request_json, ensure_ascii=False)
                 )
-                process = await asyncio.create_subprocess_exec(
-                    *command, prompt, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-                )
-                self._processes[run.id] = process
-                stdout, stderr = await asyncio.wait_for(
-                    process.communicate(), settings.codex_timeout_seconds
+                raw = await self._invoke_cli(
+                    run, settings, runtime, schema_path, prompt, output_path,
+                    settings.engine_timeout_seconds,
                 )
                 if run.status == "cancelled" or run.id in self._cancelled_runs:
                     return
-                if process.returncode != 0:
-                    raise RuntimeError(
-                        redact(stderr.decode(errors="replace") or stdout.decode(errors="replace"))
-                    )
                 run.status = "validating"
                 await db.commit()
-                raw = (
-                    output_path.read_text()
-                    if output_path.exists()
-                    else stdout.decode(errors="replace")
-                )
                 try:
-                    result = CodexOutput.model_validate_json(raw)
+                    result = EngineOutput.model_validate_json(raw)
                 except ValidationError:
                     run.retry_count = 1
                     repair_path = runs_dir / f"{run.id}-repair.json"
-                    repair_command = [
-                        settings.codex_bin,
-                        "exec",
-                        "--sandbox",
-                        "read-only",
-                        "--ephemeral",
-                        "--skip-git-repo-check",
-                        "--output-schema",
-                        str(schema_path),
-                        "--output-last-message",
-                        str(repair_path),
-                        "--color",
-                        "never",
-                        "-C",
-                        str(runtime),
-                    ]
-                    repair = await asyncio.create_subprocess_exec(
-                        *repair_command,
+                    repair_prompt = (
                         "Repair the following invalid response. Return only JSON matching the "
-                        "output schema, without adding claims:\n" + raw[:12000],
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
+                        "output schema, without adding claims:\n" + raw[:12000]
                     )
-                    self._processes[run.id] = repair
-                    repair_stdout, repair_stderr = await asyncio.wait_for(
-                        repair.communicate(), min(60, settings.codex_timeout_seconds)
+                    repair_raw = await self._invoke_cli(
+                        run, settings, runtime, schema_path, repair_prompt, repair_path,
+                        min(60, settings.engine_timeout_seconds),
                     )
-                    if repair.returncode != 0:
-                        raise RuntimeError(redact(repair_stderr.decode(errors="replace"))) from None
-                    result = CodexOutput.model_validate_json(
-                        repair_path.read_text()
-                        if repair_path.exists()
-                        else repair_stdout.decode(errors="replace")
-                    )
+                    if run.status == "cancelled" or run.id in self._cancelled_runs:
+                        return
+                    result = EngineOutput.model_validate_json(repair_raw)
             valid_ids = {item["segment_id"] for item in run.request_json["recent_transcript"]}
             referenced_ids = {
                 *result.evidence_segment_ids,
@@ -454,7 +506,7 @@ class CodexManager:
                         db,
                         meeting.id,
                         "suggestion.created",
-                        "codex-worker",
+                        "cli-worker",
                         {
                             "suggestion_id": suggestion.id,
                             "category": suggestion.category,
@@ -466,7 +518,7 @@ class CodexManager:
                         db,
                         meeting.id,
                         "suggestion.duplicate_suppressed",
-                        "codex-worker",
+                        "cli-worker",
                         {"run_id": run.id, "category": result.category},
                     )
             run.status = "completed"
@@ -474,7 +526,7 @@ class CodexManager:
                 db,
                 meeting.id,
                 "codex.completed",
-                "codex-worker",
+                "cli-worker",
                 {"run_id": run.id, "should_suggest": result.should_suggest},
             )
         except TimeoutError:
@@ -485,14 +537,14 @@ class CodexManager:
                 except ProcessLookupError:
                     pass
             run.status, run.sanitized_stderr = "timed_out", "Codex execution timed out"
-            await emit(db, meeting.id, "codex.timed_out", "codex-worker", {"run_id": run.id})
+            await emit(db, meeting.id, "codex.timed_out", "cli-worker", {"run_id": run.id})
         except (RuntimeError, ValueError, ValidationError, OSError) as exc:
             run.status, run.sanitized_stderr = "failed", redact(str(exc))
             await emit(
                 db,
                 meeting.id,
                 "codex.failed",
-                "codex-worker",
+                "cli-worker",
                 {"run_id": run.id, "error": run.sanitized_stderr},
             )
         finally:
@@ -501,10 +553,10 @@ class CodexManager:
             run.duration_ms = round((perf_counter() - started) * 1000)
             await db.commit()
 
-    async def _remote_execute(self, run: CodexRun, settings: Settings) -> CodexOutput:
-        worker_url = settings.codex_worker_url
+    async def _remote_execute(self, run: CodexRun, settings: Settings) -> EngineOutput:
+        worker_url = settings.cli_worker_url
         if not worker_url:
-            raise RuntimeError("Codex worker URL is not configured")
+            raise RuntimeError("CLI worker URL is not configured")
         token = settings.worker_token()
         if not token:
             raise RuntimeError("Worker token is not configured")
@@ -512,14 +564,15 @@ class CodexManager:
             "run_id": run.id,
             "meeting_id": run.meeting_id,
             "request": run.request_json,
+            "engine": engine_of(run.provider),
             "profile": run.profile,
             "model": run.model,
-            "timeout_seconds": settings.codex_timeout_seconds,
+            "timeout_seconds": settings.engine_timeout_seconds,
         }
         response: httpx.Response | None = None
         for attempt in range(2):
             try:
-                async with httpx.AsyncClient(timeout=settings.codex_timeout_seconds + 15) as client:
+                async with httpx.AsyncClient(timeout=settings.engine_timeout_seconds + 15) as client:
                     response = await client.post(
                         f"{worker_url.rstrip('/')}/v1/execute",
                         headers={"X-Worker-Token": token, "X-Request-ID": run.id},
@@ -531,11 +584,11 @@ class CodexManager:
                 raise TimeoutError from exc
             except httpx.TransportError:
                 if attempt == 1:
-                    raise RuntimeError("Codex worker transport failed") from None
+                    raise RuntimeError("CLI worker transport failed") from None
             run.retry_count = attempt + 1
             await asyncio.sleep(0.5 * (attempt + 1))
         if response is None:
-            raise RuntimeError("Codex worker did not return a response")
+            raise RuntimeError("CLI worker did not return a response")
         if response.status_code == 504:
             raise TimeoutError
         if not response.is_success:
@@ -543,13 +596,13 @@ class CodexManager:
         body = response.json()
         run.retry_count = int(body.get("retry_count", 0))
         run.status = "validating"
-        return CodexOutput.model_validate(body["result"])
+        return EngineOutput.model_validate(body["result"])
 
 
-manager = CodexManager()
+manager = EngineManager()
 
 
-async def apply_state_patch(db: AsyncSession, meeting: Meeting, result: CodexOutput) -> None:
+async def apply_state_patch(db: AsyncSession, meeting: Meeting, result: EngineOutput) -> None:
     """Apply allowlisted generated additions without replacing user-owned items."""
     patch = result.state_patch
     glossary = (
@@ -646,4 +699,4 @@ async def apply_state_patch(db: AsyncSession, meeting: Meeting, result: CodexOut
             source="codex",
         )
     )
-    await emit(db, meeting.id, "state.updated", "codex-worker", {"version": state["version"]})
+    await emit(db, meeting.id, "state.updated", "cli-worker", {"version": state["version"]})

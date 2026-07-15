@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["should_suggest", "confidence", "category", "suggestion", "reason", "follow_up_question", "evidence_segment_ids", "state_patch"],
+  "required": ["should_suggest", "confidence", "category", "suggestion", "reason", "follow_up_question", "evidence_segment_ids", "summary_patch", "next_steps", "suggested_agenda", "translations", "state_patch"],
   "properties": {
     "should_suggest": {"type": "boolean"},
     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
@@ -13,6 +13,7 @@
     "evidence_segment_ids": {"type": "array", "items": {"type": "string"}},
     "summary_patch": {
       "type": "object", "additionalProperties": false,
+      "required": ["current_topic", "discussion_summary"],
       "properties": {
         "current_topic": {"type": ["string", "null"], "maxLength": 500},
         "discussion_summary": {"type": ["string", "null"], "maxLength": 5000}
@@ -34,7 +35,7 @@
     },
     "state_patch": {
       "type": "object", "additionalProperties": false,
-      "required": ["current_topic", "add_decisions", "add_open_questions", "add_risks", "add_action_items", "add_parking_lot"],
+      "required": ["current_topic", "add_decisions", "add_open_questions", "add_risks", "add_action_items", "add_parking_lot", "add_project_memory"],
       "properties": {
         "current_topic": {"type": ["string", "null"]},
         "add_decisions": {"type": "array", "items": {"type": "string"}},

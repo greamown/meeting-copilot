@@ -6,11 +6,11 @@ import httpx
 
 from app.core.config import Settings
 from app.db.base import CodexRun, ModelProvider
-from app.services.codex import manager
+from app.services.engine import manager
 from app.services.providers import test_provider as check_provider
 from app.services.stt import RemoteSTTService
 from app.services.system import codex_status, gpu_status
-from app.workers.codex_api import clean_cli_output, clean_login_line
+from app.workers.engine_api import clean_cli_output, clean_login_line
 
 
 class FakeClient:
@@ -97,7 +97,7 @@ def test_remote_codex_returns_validated_result(monkeypatch, tmp_path: Path):
     )
     parsed = asyncio.run(
         manager._remote_execute(
-            run, settings(tmp_path, codex_worker_url="http://codex-worker:8002")
+            run, settings(tmp_path, cli_worker_url="http://codex-worker:8002")
         )
     )
     assert parsed.should_suggest is False
@@ -112,7 +112,7 @@ def test_remote_health_proxies_worker_status(monkeypatch, tmp_path: Path):
     )
     monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
     status = asyncio.run(
-        codex_status(settings(tmp_path, codex_worker_url="http://codex-worker:8002"))
+        codex_status(settings(tmp_path, cli_worker_url="http://codex-worker:8002"))
     )
     assert status["authenticated"] is True
     FakeClient.response = response(200, {"available": True, "gpus": [{"name": "A6000"}]})

@@ -41,7 +41,7 @@ async def main() -> None:
     mock.chmod(mock.stat().st_mode | stat.S_IXUSR)
     settings = get_settings()
     settings.codex_bin = str(mock)
-    settings.codex_timeout_seconds = 5
+    settings.engine_timeout_seconds = 5
     async with app.router.lifespan_context(app):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             assert (await client.get("/api/health")).status_code == 200
@@ -86,11 +86,11 @@ async def main() -> None:
             invalid_detail = await wait_status(invalid.json()["run_id"], {"failed"})
             assert any(item["status"] == "failed" for item in invalid_detail["codex_runs"])
             os.environ["MOCK_CODEX_MODE"] = "sleep"
-            settings.codex_timeout_seconds = 0.1
+            settings.engine_timeout_seconds = 0.1
             timed = await client.post(f"/api/meetings/{meeting_id}/analyze")
             timed_detail = await wait_status(timed.json()["run_id"], {"timed_out"})
             assert any(item["status"] == "timed_out" for item in timed_detail["codex_runs"])
-            settings.codex_timeout_seconds = 5
+            settings.engine_timeout_seconds = 5
             cancel = await client.post(f"/api/meetings/{meeting_id}/analyze")
             cancelled = await client.post(f"/api/codex-runs/{cancel.json()['run_id']}/cancel")
             assert cancelled.json()["cancelled"] is True

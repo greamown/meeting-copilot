@@ -9,17 +9,17 @@ FROM node:22-bookworm-slim
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
-    && npm install --global @openai/codex@0.144.3 \
+    && npm install --global @openai/codex@0.144.3 @anthropic-ai/claude-code@2.1.209 \
     && groupadd --gid 10002 codex \
     && useradd --uid 10002 --gid codex --create-home codex \
-    && mkdir -p /home/codex/.codex /app/runtime \
+    && mkdir -p /home/codex/.codex /home/codex/.claude /app/runtime \
     && chown -R codex:codex /home/codex /app/runtime
 COPY --from=python-runtime /usr/local /usr/local
 COPY --from=python-runtime /opt/venv /opt/venv
 COPY backend /app/backend
 COPY schemas /app/schemas
 COPY scripts /app/scripts
-ENV PATH=/opt/venv/bin:/usr/local/bin:/usr/bin CODEX_HOME=/home/codex/.codex PYTHONPATH=/app/backend PYTHONUNBUFFERED=1 MC_RUNTIME_DIR=/app/runtime
+ENV PATH=/opt/venv/bin:/usr/local/bin:/usr/bin CODEX_HOME=/home/codex/.codex CLAUDE_CONFIG_DIR=/home/codex/.claude PYTHONPATH=/app/backend PYTHONUNBUFFERED=1 MC_RUNTIME_DIR=/app/runtime
 USER codex
 ENTRYPOINT ["/app/scripts/secure_entrypoint.sh"]
-CMD ["uvicorn", "app.workers.codex_api:app", "--host", "0.0.0.0", "--port", "8002"]
+CMD ["uvicorn", "app.workers.engine_api:app", "--host", "0.0.0.0", "--port", "8002"]

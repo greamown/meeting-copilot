@@ -23,7 +23,7 @@ from app.core.config import get_settings
 from app.db.base import Base, CodexRun, Meeting, ModelProvider
 from app.db.session import SessionLocal, engine
 from app.services.auth import remote_auth_applies, request_identity, verify_csrf
-from app.services.codex import manager as codex_manager
+from app.services.engine import manager as engine_manager
 
 settings = get_settings()
 logger = logging.getLogger("meeting_copilot")
@@ -60,6 +60,15 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
                     "network_access": False,
                     "repository_access": False,
                 },
+            },
+            {
+                "id": "claude-local",
+                "name": "Claude Code",
+                "role": "reasoning",
+                "provider_type": "claude_code",
+                "model": settings.claude_model,
+                "is_default": False,
+                "extra_json": {},
             },
             {
                 "id": "local-stt-primary",
@@ -106,7 +115,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        await codex_manager.shutdown()
+        await engine_manager.shutdown()
         await engine.dispose()
 
 

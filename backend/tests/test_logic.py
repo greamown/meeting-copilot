@@ -1,4 +1,6 @@
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -6,8 +8,8 @@ from pydantic import ValidationError
 from app.core.config import Settings
 from app.db.base import Meeting, ProjectGlossary, ProjectMemory, TranscriptSegment
 from app.schemas.common import ProviderBase
-from app.schemas.meeting import CodexOutput
-from app.services.codex import build_request
+from app.schemas.meeting import EngineOutput
+from app.services.engine import build_request
 from app.services.glossary import normalize_transcript, normalize_translation
 from app.services.stt import whisper_language
 from app.services.trigger import TriggerContext, decide_trigger, merge_overlap, similar
@@ -56,10 +58,29 @@ def test_codex_schema_rejects_unknown_state_operation():
         },
     }
     with pytest.raises(ValidationError):
-        CodexOutput.model_validate(payload)
+        EngineOutput.model_validate(payload)
+
+
+def test_engine_response_schema_is_strict_output_compatible():
+    schema = json.loads(Path("schemas/engine-response.schema.json").read_text())
+
+    def check(node: object) -> None:
+        if isinstance(node, dict):
+            if node.get("type") == "object" and node.get("additionalProperties") is False:
+                assert set(node.get("required", [])) == set(node.get("properties", {}))
+            for value in node.values():
+                check(value)
+        elif isinstance(node, list):
+            for value in node:
+                check(value)
+
+    check(schema)
 
 
 def test_provider_configuration_validation():
+    assert ProviderBase(
+        id="claude-local", name="Claude Code", role="reasoning", provider_type="claude_code"
+    ).provider_type == "claude_code"
     with pytest.raises(ValidationError):
         ProviderBase(id="x", name="bad", role="chat", provider_type="codex_cli")
 
@@ -164,3 +185,29 @@ def test_codex_context_is_bounded_and_contains_project_memory():
     }
     assert request["review_roles"] == ["security"]
     assert sum(len(row["text"]) for row in request["recent_transcript"]) <= 12_000
+
+
+def test_build_cli_command_selects_engine(tmp_path):
+    from app.services.engine import build_cli_command, engine_of, extract_claude_result
+
+    assert engine_of("claude_code") == "claude"
+    assert engine_of("codex_cli") == "codex" and engine_of(None) == "codex"
+
+    schema = tmp_path / "schema.json"
+    schema.write_text('{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object"}')
+    settings = Settings()
+    out = tmp_path / "out.json"
+
+    codex_cmd = build_cli_command("codex", "gpt-x", "p1", settings, tmp_path, schema, out)
+    assert codex_cmd[0] == settings.codex_bin and "--output-schema" in codex_cmd
+    assert str(schema) in codex_cmd  # codex takes the schema path
+
+    claude_cmd = build_cli_command("claude", None, None, settings, tmp_path, schema, out)
+    assert claude_cmd[0] == settings.claude_bin and "--json-schema" in claude_cmd
+    inline = claude_cmd[claude_cmd.index("--json-schema") + 1]
+    assert "$schema" not in inline  # meta-ref stripped; claude rejects it
+
+    envelope = '{"is_error": false, "subtype": "success", "result": "{\\"ok\\": true}"}'
+    assert extract_claude_result(envelope) == '{"ok": true}'
+    with pytest.raises(RuntimeError):
+        extract_claude_result('{"is_error": true, "result": "boom"}')

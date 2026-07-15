@@ -19,12 +19,15 @@ class Settings(BaseSettings):
     repository_roots: list[Path] = []
     redis_url: str | None = None
     codex_bin: str = "codex"
-    codex_worker_url: str | None = None
+    cli_worker_url: str | None = None
     stt_worker_url: str | None = None
     tts_worker_url: str | None = None
     worker_token_file: Path | None = None
     codex_profile: str | None = None
     codex_model: str | None = None
+    claude_bin: str = "claude"
+    claude_model: str | None = None
+    analysis_engine: str = "codex"  # "codex" | "claude"; per-meeting override via config
     stt_model: str = "large-v3-turbo"
     stt_device: str = "cuda"
     stt_compute_type: str = "float16"
@@ -34,7 +37,7 @@ class Settings(BaseSettings):
     secret_key: str | None = None
     max_audio_frame_bytes: int = 64_000
     max_request_body_bytes: int = 2_000_000
-    codex_timeout_seconds: int = 180
+    engine_timeout_seconds: int = 180
     remote_auth_required: bool = False
     auth_session_hours: int = 24
 

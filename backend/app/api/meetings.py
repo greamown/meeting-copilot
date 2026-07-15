@@ -41,8 +41,8 @@ from app.db.base import (
 from app.db.session import SessionLocal, get_db
 from app.schemas.meeting import (
     AskRequest,
-    CodexRunResponse,
     CommandResponse,
+    EngineRunResponse,
     ManualSuggestionCreate,
     MeetingCreate,
     MeetingDetail,
@@ -53,8 +53,8 @@ from app.schemas.meeting import (
     TranscriptEdit,
     TranscriptRead,
 )
-from app.services.auth import remote_auth_applies, websocket_identity
-from app.services.codex import build_request, get_project_context, manager
+from app.services.auth import remote_auth_applies, websocket_identity, websocket_origin_allowed
+from app.services.engine import build_request, get_project_context, manager
 from app.services.events import emit, hub
 from app.services.glossary import normalize_transcript
 from app.services.stt import create_stt_service
@@ -374,7 +374,7 @@ async def request_codex(
     question: str | None,
     db: AsyncSession,
     settings: Settings,
-) -> CodexRunResponse:
+) -> EngineRunResponse:
     meeting = await require_meeting(db, meeting_id)
     active = await db.scalar(
         select(func.count())
@@ -412,14 +412,16 @@ async def request_codex(
     request = build_request(
         meeting, transcripts, suggestions, job_type, question, memory, glossary, knowledge
     )
+    engine = meeting.configuration_json.get("analysis_engine") or settings.analysis_engine
+    claude = engine == "claude"
     run = CodexRun(
         meeting_id=meeting_id,
         job_type=job_type,
         trigger=trigger,
         status="queued",
-        profile=meeting.configuration_json.get("codex_profile") or settings.codex_profile,
-        model=settings.codex_model,
-        provider="codex_cli",
+        profile=None if claude else (meeting.configuration_json.get("codex_profile") or settings.codex_profile),
+        model=settings.claude_model if claude else settings.codex_model,
+        provider="claude_code" if claude else "codex_cli",
         request_json=request,
     )
     db.add(run)
@@ -429,25 +431,25 @@ async def request_codex(
     )
     await db.commit()
     manager.enqueue(run.id, meeting_id, settings, SessionLocal)
-    return CodexRunResponse(run_id=run.id, status="queued")
+    return EngineRunResponse(run_id=run.id, status="queued")
 
 
-@router.post("/meetings/{meeting_id}/ask", response_model=CodexRunResponse)
+@router.post("/meetings/{meeting_id}/ask", response_model=EngineRunResponse)
 async def ask(
     meeting_id: str,
     payload: AskRequest,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-) -> CodexRunResponse:
+) -> EngineRunResponse:
     return await request_codex(
         meeting_id, "manual_ask", "manual_ask", payload.question, db, settings
     )
 
 
-@router.post("/meetings/{meeting_id}/analyze", response_model=CodexRunResponse)
+@router.post("/meetings/{meeting_id}/analyze", response_model=EngineRunResponse)
 async def analyze(
     meeting_id: str, db: AsyncSession = Depends(get_db), settings: Settings = Depends(get_settings)
-) -> CodexRunResponse:
+) -> EngineRunResponse:
     return await request_codex(
         meeting_id, "manual_analysis", "periodic_analysis", None, db, settings
     )
@@ -945,8 +947,9 @@ async def export_markdown(meeting_id: str, db: AsyncSession = Depends(get_db)) -
 async def events_socket(
     websocket: WebSocket, meeting_id: str, settings: Settings = Depends(get_settings)
 ) -> None:
-    origin = websocket.headers.get("origin")
-    if origin and origin not in settings.allowed_origins:
+    if not websocket_origin_allowed(
+        websocket.headers.get("origin"), websocket.headers.get("host"), settings.allowed_origins
+    ):
         await websocket.close(code=1008)
         return
     if remote_auth_applies(websocket.url.hostname, settings):
@@ -966,8 +969,9 @@ async def events_socket(
 async def audio_socket(
     websocket: WebSocket, meeting_id: str, settings: Settings = Depends(get_settings)
 ) -> None:
-    origin = websocket.headers.get("origin")
-    if origin and origin not in settings.allowed_origins:
+    if not websocket_origin_allowed(
+        websocket.headers.get("origin"), websocket.headers.get("host"), settings.allowed_origins
+    ):
         await websocket.close(code=1008)
         return
     if remote_auth_applies(websocket.url.hostname, settings):
@@ -1198,14 +1202,16 @@ async def audio_socket(
                                 glossary,
                                 knowledge,
                             )
+                            engine = config.get("analysis_engine") or settings.analysis_engine
+                            claude = engine == "claude"
                             run = CodexRun(
                                 meeting_id=meeting_id,
                                 job_type="periodic_analysis",
                                 trigger=trigger.trigger or "periodic_analysis",
                                 status="queued",
-                                profile=config.get("codex_profile") or settings.codex_profile,
-                                model=settings.codex_model,
-                                provider="codex_cli",
+                                profile=None if claude else (config.get("codex_profile") or settings.codex_profile),
+                                model=settings.claude_model if claude else settings.codex_model,
+                                provider="claude_code" if claude else "codex_cli",
                                 request_json=request,
                             )
                             db.add(run)

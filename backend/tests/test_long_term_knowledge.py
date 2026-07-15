@@ -2,8 +2,8 @@ from datetime import UTC, datetime, timedelta
 
 from app.db.base import Meeting, TranscriptSegment
 from app.db.session import SessionLocal
-from app.schemas.meeting import CodexOutput
-from app.services.codex import apply_state_patch
+from app.schemas.meeting import EngineOutput
+from app.services.engine import apply_state_patch
 
 
 async def _project_and_meeting(client):
@@ -191,7 +191,7 @@ async def test_codex_translation_preserves_original_and_applies_glossary(client)
         await db.flush()
         meeting = await db.get(Meeting, meeting_data["id"])
         assert meeting is not None
-        result = CodexOutput.model_validate(
+        result = EngineOutput.model_validate(
             {
                 "should_suggest": False,
                 "confidence": 1,

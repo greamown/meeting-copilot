@@ -10,7 +10,7 @@ from app.core.config import Settings, get_settings
 from app.db.base import AppSetting
 from app.db.session import get_db
 from app.schemas.common import HealthResponse
-from app.services.system import codex_status, gpu_status, system_status
+from app.services.system import claude_status, codex_status, gpu_status, system_status
 
 router = APIRouter()
 
@@ -68,5 +68,15 @@ async def get_codex_status(
 ) -> dict[str, Any]:
     status = await codex_status(settings)
     last_test = await db.scalar(select(AppSetting).where(AppSetting.key == "codex_last_test"))
+    status["last_test"] = last_test.value_json if last_test else None
+    return status
+
+
+@router.get("/claude/status")
+async def get_claude_status(
+    settings: Settings = Depends(get_settings), db: AsyncSession = Depends(get_db)
+) -> dict[str, Any]:
+    status = await claude_status(settings)
+    last_test = await db.scalar(select(AppSetting).where(AppSetting.key == "claude_last_test"))
     status["last_test"] = last_test.value_json if last_test else None
     return status

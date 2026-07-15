@@ -1,4 +1,5 @@
 import asyncio
+import json
 import platform
 import shutil
 import sys
@@ -70,12 +71,12 @@ async def gpu_status(settings: Settings | None = None) -> dict[str, Any]:
 
 
 async def codex_status(settings: Settings) -> dict[str, Any]:
-    if settings.codex_worker_url:
+    if settings.cli_worker_url:
         token = settings.worker_token()
         try:
             async with httpx.AsyncClient(timeout=8) as client:
                 response = await client.get(
-                    f"{settings.codex_worker_url.rstrip('/')}/v1/status",
+                    f"{settings.cli_worker_url.rstrip('/')}/v1/status",
                     headers={"X-Worker-Token": token},
                 )
             response.raise_for_status()
@@ -88,7 +89,7 @@ async def codex_status(settings: Settings) -> dict[str, Any]:
                 "profile": settings.codex_profile,
                 "model": settings.codex_model,
                 "provider": "codex_cli",
-                "error": f"Codex worker unavailable: {type(exc).__name__}",
+                "error": f"CLI worker unavailable: {type(exc).__name__}",
             }
     path = shutil.which(settings.codex_bin)
     if not path:
@@ -112,6 +113,61 @@ async def codex_status(settings: Settings) -> dict[str, Any]:
         "provider": "codex_cli",
         "error": redact(version_error or auth_error),
         "status": redact(auth_output.strip()),
+    }
+
+
+async def claude_status(settings: Settings) -> dict[str, Any]:
+    if settings.cli_worker_url:  # cli-worker also runs claude
+        token = settings.worker_token()
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                response = await client.get(
+                    f"{settings.cli_worker_url.rstrip('/')}/v1/status",
+                    headers={"X-Worker-Token": token},
+                    params={"engine": "claude"},
+                )
+            response.raise_for_status()
+            return cast(dict[str, Any], response.json())
+        except httpx.HTTPError as exc:
+            return {
+                "installed": False,
+                "authenticated": False,
+                "version": None,
+                "profile": None,
+                "model": settings.claude_model,
+                "provider": "claude_code",
+                "error": f"CLI worker unavailable: {type(exc).__name__}",
+            }
+    path = shutil.which(settings.claude_bin)
+    if not path:
+        return {
+            "installed": False,
+            "authenticated": False,
+            "version": None,
+            "profile": None,
+            "model": settings.claude_model,
+            "provider": "claude_code",
+            "error": "Claude Code CLI not found",
+        }
+    version_code, version, version_error = await run_command([path, "--version"])
+    auth_code, auth_output, auth_error = await run_command([path, "auth", "status"])
+    # `claude auth status` prints JSON; fall back to the exit code if that changes.
+    authenticated, account = auth_code == 0, ""
+    try:
+        data = json.loads(auth_output)
+        authenticated = bool(data.get("loggedIn"))
+        account = " ".join(filter(None, [data.get("email"), data.get("subscriptionType")]))
+    except (ValueError, TypeError):
+        account = auth_output.strip()
+    return {
+        "installed": version_code == 0,
+        "authenticated": authenticated,
+        "version": version.strip() or None,
+        "profile": None,
+        "model": settings.claude_model,
+        "provider": "claude_code",
+        "error": redact(version_error or auth_error),
+        "status": redact(account),
     }
 
 
