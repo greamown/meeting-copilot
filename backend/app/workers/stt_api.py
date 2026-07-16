@@ -46,6 +46,7 @@ async def transcribe(
     request: Request,
     start_ms: int = Query(ge=0),
     language: str = Query(default="zh", max_length=20),
+    prompt: str | None = Query(default=None, max_length=400),
 ) -> dict[str, object]:
     global active_requests, completed_requests
     pcm = await request.body()
@@ -54,7 +55,7 @@ async def transcribe(
     active_requests += 1
     started = perf_counter()
     try:
-        segments = await service.transcribe(pcm, start_ms, language)
+        segments = await service.transcribe(pcm, start_ms, language, prompt=prompt)
     finally:
         active_requests -= 1
         completed_requests += 1

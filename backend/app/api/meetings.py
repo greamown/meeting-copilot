@@ -58,7 +58,12 @@ from app.services.engine import build_request, get_project_context, manager
 from app.services.events import emit, hub
 from app.services.glossary import normalize_transcript
 from app.services.stt import create_stt_service
-from app.services.trigger import TriggerContext, decide_trigger, merge_overlap
+from app.services.trigger import (
+    TriggerContext,
+    accumulate_new_characters,
+    decide_trigger,
+    merge_overlap,
+)
 
 router = APIRouter()
 
@@ -984,7 +989,17 @@ async def audio_socket(
     service = create_stt_service(settings)
     buffer = bytearray()
     expected = 0
-    window_start = 0
+    # Resume the timeline after a reconnect: restarting at 0 rewinds timestamps,
+    # duplicates transcript rows, and scrambles the transcript ordering.
+    async with SessionLocal() as db:
+        window_start = (
+            await db.scalar(
+                select(func.max(TranscriptSegment.end_ms)).where(
+                    TranscriptSegment.meeting_id == meeting_id
+                )
+            )
+            or 0
+        )
     try:
         while True:
             frame = await websocket.receive_bytes()
@@ -1046,7 +1061,7 @@ async def audio_socket(
                 await db.commit()
                 await websocket.send_json({"type": "audio.ack", "sequence": sequence})
                 buffer.extend(audio)
-                if len(buffer) >= 128_000:
+                if len(buffer) >= 64_000:  # 2s window: halves transcript latency
                     try:
                         config = meeting.configuration_json
                         stt_language = (
@@ -1056,8 +1071,26 @@ async def audio_socket(
                         )
                         stt_started = perf_counter()
                         audio_duration_ms = len(buffer) / 32
+                        previous = (
+                            await db.scalar(
+                                select(TranscriptSegment.text)
+                                .where(TranscriptSegment.meeting_id == meeting_id)
+                                .order_by(desc(TranscriptSegment.sequence))
+                                .limit(1)
+                            )
+                            or ""
+                        )
+                        # Anchor whisper on script + prior text: fixes cross-window amnesia
+                        # and biases zh output to the meeting's script (zh-TW ≠ zh-CN).
+                        script_hint = {
+                            "zh-TW": "以下是繁體中文會議逐字稿。",
+                            "zh-CN": "以下是简体中文会议记录。",
+                        }.get(meeting.language, "")
                         results = await service.transcribe(
-                            bytes(buffer), window_start, stt_language
+                            bytes(buffer),
+                            window_start,
+                            stt_language,
+                            prompt=(script_hint + previous[-150:]) or None,
                         )
                         stt_latency_ms = round((perf_counter() - stt_started) * 1000, 2)
                         await emit(
@@ -1087,15 +1120,6 @@ async def audio_socket(
                             if meeting.project_id
                             else []
                         )
-                        previous = (
-                            await db.scalar(
-                                select(TranscriptSegment.text)
-                                .where(TranscriptSegment.meeting_id == meeting_id)
-                                .order_by(desc(TranscriptSegment.sequence))
-                                .limit(1)
-                            )
-                            or ""
-                        )
                         next_sequence = (
                             await db.scalar(
                                 select(func.max(TranscriptSegment.sequence)).where(
@@ -1104,6 +1128,7 @@ async def audio_socket(
                             )
                             or 0
                         ) + 1
+                        added_characters = 0
                         for result in results:
                             text = normalize_transcript(
                                 merge_overlap(previous, result.text), glossary
@@ -1134,6 +1159,7 @@ async def audio_socket(
                             )
                             db.add(row)
                             await db.flush()
+                            added_characters += len(text)
                             await emit(
                                 db,
                                 meeting_id,
@@ -1147,6 +1173,13 @@ async def audio_socket(
                             )
                             next_sequence += 1
                             previous += text
+                        state = dict(config.get("state") or {})
+                        accumulated_characters = accumulate_new_characters(
+                            state, added_characters
+                        )
+                        state["new_transcript_characters"] = accumulated_characters
+                        config = {**config, "state": state}
+                        meeting.configuration_json = config
                         await db.commit()
                         trigger = decide_trigger(
                             TriggerContext(
@@ -1155,8 +1188,21 @@ async def audio_socket(
                                 automatic_enabled=bool(
                                     config.get("automatic_analysis_enabled", True)
                                 ),
-                                new_characters=sum(len(item.text) for item in results),
+                                new_characters=accumulated_characters,
                                 minimum_characters=int(config.get("minimum_new_characters", 300)),
+                                last_codex_at=(
+                                    datetime.fromisoformat(state["last_codex_run_at"])
+                                    if state.get("last_codex_run_at")
+                                    else None
+                                ),
+                                codex_cooldown_seconds=int(
+                                    config.get("codex_cooldown_seconds", 60)
+                                ),
+                                last_suggestion_at=(
+                                    datetime.fromisoformat(state["last_suggestion_at"])
+                                    if state.get("last_suggestion_at")
+                                    else None
+                                ),
                                 suggestion_cooldown_seconds=int(
                                     config.get("suggestion_cooldown_seconds", 180)
                                 ),
@@ -1171,6 +1217,9 @@ async def audio_socket(
                             )
                         )
                         if trigger.invoke and not active_run:
+                            state["new_transcript_characters"] = 0
+                            state["last_codex_run_at"] = datetime.now(UTC).isoformat()
+                            meeting.configuration_json = {**config, "state": state}
                             all_transcripts = list(
                                 (
                                     await db.scalars(
@@ -1237,9 +1286,80 @@ async def audio_socket(
                             {"message": f"STT unavailable: {type(exc).__name__}"},
                         )
                         await db.commit()
-                    window_start += len(buffer) // 32
-                    buffer.clear()
+                    # Keep a 0.5s tail so consecutive windows overlap: words are no longer
+                    # cut at window edges; merge_overlap strips the re-transcribed prefix.
+                    advance = max(len(buffer) - 16_000, 0)
+                    window_start += advance // 32
+                    del buffer[:advance]
     except WebSocketDisconnect:
+        if len(buffer) > 16_000:  # audio beyond the retained overlap tail: flush the last words
+            try:
+                config = meeting.configuration_json
+                stt_language = (
+                    "auto"
+                    if config.get("secondary_language", "none") != "none"
+                    else meeting.language
+                )
+                results = await service.transcribe(bytes(buffer), window_start, stt_language)
+                glossary = (
+                    list(
+                        (
+                            await db.scalars(
+                                select(ProjectGlossary).where(
+                                    ProjectGlossary.project_id == meeting.project_id
+                                )
+                            )
+                        ).all()
+                    )
+                    if meeting.project_id
+                    else []
+                )
+                previous = (
+                    await db.scalar(
+                        select(TranscriptSegment.text)
+                        .where(TranscriptSegment.meeting_id == meeting_id)
+                        .order_by(desc(TranscriptSegment.sequence))
+                        .limit(1)
+                    )
+                    or ""
+                )
+                next_sequence = (
+                    await db.scalar(
+                        select(func.max(TranscriptSegment.sequence)).where(
+                            TranscriptSegment.meeting_id == meeting_id
+                        )
+                    )
+                    or 0
+                ) + 1
+                for result in results:
+                    text = normalize_transcript(merge_overlap(previous, result.text), glossary)
+                    if not text:
+                        continue
+                    row = TranscriptSegment(
+                        meeting_id=meeting_id,
+                        sequence=next_sequence,
+                        start_ms=result.start_ms,
+                        end_ms=result.end_ms,
+                        text=text,
+                        language=result.language
+                        or (meeting.language if meeting.language != "auto" else "und"),
+                        confidence=result.confidence,
+                        is_final=True,
+                    )
+                    db.add(row)
+                    await db.flush()
+                    await emit(
+                        db,
+                        meeting_id,
+                        "transcript.final",
+                        "stt-worker",
+                        {"segment": TranscriptRead.model_validate(row).model_dump(mode="json")},
+                    )
+                    next_sequence += 1
+                    previous += text
+                await db.commit()
+            except Exception:  # noqa: BLE001 — flush is best-effort on disconnect
+                pass
         return
     finally:
         hub.audio_disconnected()

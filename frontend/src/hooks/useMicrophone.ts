@@ -16,7 +16,12 @@ function legacyProcessor(context: AudioContext, onChunk?: (chunk: ArrayBuffer) =
     const ratio = context.sampleRate / 16000;
     const pcm = new Int16Array(Math.floor(input.length / ratio));
     for (let index = 0; index < pcm.length; index += 1) {
-      const sample = Math.max(-1, Math.min(1, input[Math.floor(index * ratio)] ?? 0));
+      // Average the source window (see pcm-processor.js): avoids aliasing artifacts.
+      const from = Math.floor(index * ratio);
+      const to = Math.min(input.length, Math.max(from + 1, Math.floor((index + 1) * ratio)));
+      let sum = 0;
+      for (let i = from; i < to; i += 1) sum += input[i] ?? 0;
+      const sample = Math.max(-1, Math.min(1, sum / (to - from)));
       pcm[index] = sample < 0 ? sample * 32768 : sample * 32767;
     }
     onChunk?.(pcm.buffer);

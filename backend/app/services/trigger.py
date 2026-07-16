@@ -25,6 +25,10 @@ class TriggerDecision:
     suppressed_by: str | None
 
 
+def accumulate_new_characters(state: dict[str, object], added: int) -> int:
+    return int(state.get("new_transcript_characters", 0)) + max(0, added)
+
+
 def decide_trigger(
     context: TriggerContext, manual: bool = False, meeting_end: bool = False
 ) -> TriggerDecision:

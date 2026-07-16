@@ -502,6 +502,10 @@ class EngineManager:
                     )
                     db.add(suggestion)
                     await db.flush()
+                    config = dict(meeting.configuration_json)
+                    state = dict(config.get("state") or {})
+                    state["last_suggestion_at"] = datetime.now(UTC).isoformat()
+                    meeting.configuration_json = {**config, "state": state}
                     await emit(
                         db,
                         meeting.id,

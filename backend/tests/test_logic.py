@@ -12,7 +12,13 @@ from app.schemas.meeting import EngineOutput
 from app.services.engine import build_request
 from app.services.glossary import normalize_transcript, normalize_translation
 from app.services.stt import whisper_language
-from app.services.trigger import TriggerContext, decide_trigger, merge_overlap, similar
+from app.services.trigger import (
+    TriggerContext,
+    accumulate_new_characters,
+    decide_trigger,
+    merge_overlap,
+    similar,
+)
 
 
 def test_trigger_suppressors_and_manual_override():
@@ -36,6 +42,14 @@ def test_overlap_and_similarity():
     assert merge_overlap("hello world", "world again") == "again"
     assert similar("Define a task lease", "define a task lease")
     assert not similar("database index", "speech playback")
+
+
+def test_transcript_characters_accumulate_across_stt_windows():
+    accumulated = accumulate_new_characters({"new_transcript_characters": 180}, 140)
+    assert accumulated == 320
+    assert not decide_trigger(
+        TriggerContext("討論內容", "active", True, accumulated)
+    ).suppressed_by
 
 
 def test_codex_schema_rejects_unknown_state_operation():

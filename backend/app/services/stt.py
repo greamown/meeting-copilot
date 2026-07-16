@@ -62,7 +62,7 @@ class FasterWhisperService:
                     raise
 
     async def transcribe(
-        self, pcm16: bytes, start_ms: int, language: str = "zh"
+        self, pcm16: bytes, start_ms: int, language: str = "zh", prompt: str | None = None
     ) -> list[Transcription]:
         await self.load()
         import numpy as np
@@ -73,6 +73,7 @@ class FasterWhisperService:
                 self._model.transcribe,
                 audio,
                 language=whisper_language(language),
+                initial_prompt=prompt,
                 vad_filter=True,
                 beam_size=5,
             )
@@ -91,6 +92,7 @@ class FasterWhisperService:
                 self._model.transcribe,
                 audio,
                 language=whisper_language(language),
+                initial_prompt=prompt,
                 vad_filter=True,
                 beam_size=5,
             )
@@ -120,14 +122,17 @@ class RemoteSTTService:
         self.token = settings.worker_token()
 
     async def transcribe(
-        self, pcm16: bytes, start_ms: int, language: str = "zh"
+        self, pcm16: bytes, start_ms: int, language: str = "zh", prompt: str | None = None
     ) -> list[Transcription]:
         if not self.token:
             raise RuntimeError("Worker token is not configured")
+        params: dict[str, Any] = {"start_ms": start_ms, "language": language}
+        if prompt:
+            params["prompt"] = prompt[:400]
         async with httpx.AsyncClient(timeout=120) as client:
             response = await client.post(
                 f"{self.url}/v1/transcribe",
-                params={"start_ms": start_ms, "language": language},
+                params=params,
                 headers={"X-Worker-Token": self.token, "Content-Type": "application/octet-stream"},
                 content=pcm16,
             )
