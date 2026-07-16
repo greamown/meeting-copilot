@@ -36,7 +36,9 @@ class EventHub:
         stale = []
         for websocket in self._clients[meeting_id]:
             try:
-                await websocket.send_json(event)
+                # A slow/backgrounded tab must not block the caller's open DB
+                # transaction: bounded send, then treat the client as stale.
+                await asyncio.wait_for(websocket.send_json(event), 2)
             except Exception:
                 stale.append(websocket)
         for websocket in stale:
