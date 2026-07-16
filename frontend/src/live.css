@@ -1,0 +1,10 @@
+.transcript-panel,
+.suggestion-panel,
+.state-panel {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.state-panel {
+  overflow-y: auto;
+}

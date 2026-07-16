@@ -3,18 +3,20 @@ import { Save, Volume2 } from "lucide-react";
 import { FormEvent, useEffect, useState } from "react";
 import { getSettings, LanguageCode, put, SettingsData } from "../lib/api";
 import { useI18n } from "../i18n";
+import { useDialogs } from "../components/DialogProvider";
 
 const languages: Array<[LanguageCode,string]> = [["zh-TW","繁體中文"],["zh-CN","簡體中文"],["en","English"],["ja","日本語"],["ko","한국어"]];
 
 export function Settings() {
   const {t}=useI18n();
+  const dialogs=useDialogs();
   const client = useQueryClient();
   const query = useQuery({ queryKey:["settings"], queryFn:getSettings });
   const [form,setForm] = useState<SettingsData|null>(null);
   useEffect(()=>{ if(query.data) setForm(query.data); },[query.data]);
   if(!form) return <div className="page">{t("loading")}</div>;
   const field = <K extends keyof SettingsData>(key:K,value:SettingsData[K]) => setForm({...form,[key]:value});
-  const submit = async(event:FormEvent) => { event.preventDefault(); await put("/settings",form); await client.invalidateQueries({queryKey:["settings"]}); alert("設定已儲存"); };
+  const submit = async(event:FormEvent) => { event.preventDefault(); await put("/settings",form); await client.invalidateQueries({queryKey:["settings"]}); await dialogs.alert({title:"設定已儲存",message:"新的語言、分析與播放政策已套用。"}); };
   const testVoice = () => { const utterance=new SpeechSynthesisUtterance("語音速率與音量測試"); utterance.lang=form.tts_language; utterance.rate=form.tts_rate; utterance.volume=form.tts_volume; speechSynthesis.cancel(); speechSynthesis.speak(utterance); };
   const options = (special?:[string,string]) => <>{special&&<option value={special[0]}>{special[1]}</option>}{languages.map(([code,label])=><option value={code} key={code}>{label}</option>)}</>;
 

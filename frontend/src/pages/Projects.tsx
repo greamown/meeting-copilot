@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Archive, BookOpen, Edit3, FolderKanban, Plus, Search, Trash2, X } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { useDialogs } from "../components/DialogProvider";
 import {
   GlossaryEntry,
   LanguageCode,
@@ -25,12 +26,13 @@ const emptyGlossary = { term:"", language:"zh-TW" as LanguageCode, preferred_spe
 const emptyMemory: MemoryForm = { category:"architecture", title:"", content:"", source_meeting_id:null, source_decision_id:null, confidence:1, status:"active" };
 
 export function Projects(){
+  const dialogs=useDialogs();
   const queryClient=useQueryClient(); const projects=useQuery({queryKey:["projects"],queryFn:getProjects});
   const [query,setQuery]=useState(""); const [editing,setEditing]=useState<Project|null|undefined>();
   const [form,setForm]=useState(emptyProject); const [error,setError]=useState("");
   const open=(project?:Project)=>{setEditing(project??null);setForm(project?{name:project.name,description:project.description,goals:project.goals,non_goals:project.non_goals,default_language:project.default_language}:emptyProject);setError("")};
   const save=async(event:FormEvent)=>{event.preventDefault();setError("");try{if(editing)await put(`/projects/${editing.id}`,form);else await post("/projects",form);await queryClient.invalidateQueries({queryKey:["projects"]});setEditing(undefined)}catch(reason){setError(reason instanceof Error?reason.message:"儲存失敗")}};
-  const destroy=async(project:Project)=>{if(!confirm(`刪除專案「${project.name}」及其 glossary 與 memory？會議會保留。`))return;await remove(`/projects/${project.id}`);await queryClient.invalidateQueries({queryKey:["projects"]})};
+  const destroy=async(project:Project)=>{if(!await dialogs.confirm({title:"刪除專案",message:`刪除專案「${project.name}」及其 glossary 與 memory？會議會保留。`,confirmLabel:"刪除",danger:true}))return;await remove(`/projects/${project.id}`);await queryClient.invalidateQueries({queryKey:["projects"]})};
   const rows=(projects.data??[]).filter(item=>`${item.name} ${item.description}`.toLowerCase().includes(query.toLowerCase()));
   return <div className="page"><header className="page-head"><div><p className="eyebrow">PROJECTS</p><h1>專案</h1><p>集中管理跨會議目標、術語與長期記憶。</p></div><div className="head-actions"><button className="button primary" onClick={()=>open()}><Plus size={17}/>新增專案</button></div></header>
     <div className="project-toolbar"><div className="search large"><Search size={16}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="搜尋專案"/></div><span>{rows.length} 個專案</span></div>
@@ -40,6 +42,7 @@ export function Projects(){
 }
 
 export function ProjectDashboard(){
+  const dialogs=useDialogs();
   const {id=""}=useParams(); const navigate=useNavigate(); const queryClient=useQueryClient();
   const project=useQuery({queryKey:["project",id],queryFn:()=>getProject(id)}); const meetings=useQuery({queryKey:["meetings"],queryFn:getMeetings});
   const glossary=useQuery({queryKey:["project-glossary",id],queryFn:()=>getProjectGlossary(id)}); const memory=useQuery({queryKey:["project-memory",id],queryFn:()=>getProjectMemory(id)});
@@ -51,8 +54,8 @@ export function ProjectDashboard(){
   const openMemory=(entry?:ProjectMemory)=>{setMemoryEdit(entry??null);setMemoryForm(entry?{category:entry.category,title:entry.title,content:entry.content,source_meeting_id:entry.source_meeting_id,source_decision_id:entry.source_decision_id,confidence:entry.confidence,status:entry.status}:emptyMemory);setError("")};
   const saveMemory=async(event:FormEvent)=>{event.preventDefault();setError("");try{if(memoryEdit)await put(`/project-memory/${memoryEdit.id}`,memoryForm);else await post(`/projects/${id}/memory`,memoryForm);await queryClient.invalidateQueries({queryKey:["project-memory",id]});await queryClient.invalidateQueries({queryKey:["project",id]});setMemoryEdit(undefined)}catch(reason){setError(reason instanceof Error?reason.message:"儲存失敗")}};
   const archive=async(entry:ProjectMemory)=>{await put(`/project-memory/${entry.id}`,{...entry,status:"archived"});await queryClient.invalidateQueries({queryKey:["project-memory",id]})};
-  const removeGlossary=async(entry:GlossaryEntry)=>{if(!confirm(`刪除術語「${entry.term}」？`))return;await remove(`/project-glossary/${entry.id}`);await queryClient.invalidateQueries({queryKey:["project-glossary",id]});await queryClient.invalidateQueries({queryKey:["project",id]})};
-  const removeMemory=async(entry:ProjectMemory)=>{if(!confirm(`永久刪除記憶「${entry.title}」？`))return;await remove(`/project-memory/${entry.id}`);await queryClient.invalidateQueries({queryKey:["project-memory",id]});await queryClient.invalidateQueries({queryKey:["project",id]})};
+  const removeGlossary=async(entry:GlossaryEntry)=>{if(!await dialogs.confirm({title:"刪除術語",message:`刪除術語「${entry.term}」？`,confirmLabel:"刪除",danger:true}))return;await remove(`/project-glossary/${entry.id}`);await queryClient.invalidateQueries({queryKey:["project-glossary",id]});await queryClient.invalidateQueries({queryKey:["project",id]})};
+  const removeMemory=async(entry:ProjectMemory)=>{if(!await dialogs.confirm({title:"永久刪除專案記憶",message:`永久刪除記憶「${entry.title}」？此操作無法復原。`,confirmLabel:"永久刪除",danger:true}))return;await remove(`/project-memory/${entry.id}`);await queryClient.invalidateQueries({queryKey:["project-memory",id]});await queryClient.invalidateQueries({queryKey:["project",id]})};
   if(project.isPending)return <div className="page"><div className="empty">載入專案</div></div>; if(!project.data)return <div className="page"><div className="alert error">專案不存在</div></div>;
   const data=project.data; const recent=(meetings.data??[]).filter(x=>x.project_id===id).slice(0,5); const memories=(memory.data??[]).filter(x=>`${x.title} ${x.content}`.toLowerCase().includes(search.toLowerCase())); const terms=(glossary.data??[]).filter(x=>`${x.term} ${x.preferred_spelling} ${x.description}`.toLowerCase().includes(search.toLowerCase()));
   return <div className="page"><header className="page-head"><div><p className="eyebrow">PROJECT · {data.default_language}</p><h1>{data.name}</h1><p>{data.description||"尚未填寫說明"}</p></div><div className="head-actions"><Link className="button primary" to={`/meetings/new?project=${id}`}><Plus size={16}/>開始會議</Link></div></header>

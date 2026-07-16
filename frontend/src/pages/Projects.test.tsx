@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, expect, test, vi } from "vitest";
 import { Projects } from "./Projects";
+import { DialogProvider } from "../components/DialogProvider";
 
 beforeEach(() => {
   vi.stubGlobal(
@@ -28,9 +29,9 @@ beforeEach(() => {
 test("lists projects and opens the create form", async () => {
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <MemoryRouter>
+      <DialogProvider><MemoryRouter>
         <Projects />
-      </MemoryRouter>
+      </MemoryRouter></DialogProvider>
     </QueryClientProvider>,
   );
   expect(await screen.findByText("Meeting Copilot")).toBeInTheDocument();
