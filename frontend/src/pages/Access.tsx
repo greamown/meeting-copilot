@@ -2,5 +2,130 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, LogOut, ShieldCheck } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { getAuthStatus, post } from "../lib/api";
+import { useI18n } from "../i18n";
 
-export function Access(){const client=useQueryClient();const status=useQuery({queryKey:["auth-status"],queryFn:getAuthStatus});const [username,setUsername]=useState("admin");const [password,setPassword]=useState("");const [confirmPassword,setConfirmPassword]=useState("");const [message,setMessage]=useState("");const [error,setError]=useState("");const bootstrap=async(event:FormEvent)=>{event.preventDefault();setError("");if(password!==confirmPassword){setError("兩次密碼不一致");return}try{await post("/auth/bootstrap",{username,password});setPassword("");setConfirmPassword("");setMessage("管理員已建立；同網域裝置現在必須登入。");await client.invalidateQueries({queryKey:["auth-status"]})}catch(reason){setError(reason instanceof Error?reason.message:"設定失敗")}};const logout=async()=>{await post("/auth/logout");await client.invalidateQueries({queryKey:["auth-status"]})};return <div className="page"><header className="page-head"><div><p className="eyebrow">REMOTE ACCESS</p><h1>存取控制</h1><p>LAN 位址使用 Argon2 管理員密碼、HttpOnly session 與 CSRF 驗證。</p></div></header>{message&&<div className="alert success">{message}</div>}{status.data?.configured?<section className="section-card access-status"><ShieldCheck/><div><h2>管理員已設定</h2><p>{status.data.authenticated?`${status.data.username} · ${status.data.role}`:"目前 localhost 不需登入；遠端位址會顯示登入畫面。"}</p></div>{status.data.authenticated&&<button className="button" onClick={()=>void logout()}><LogOut size={15}/>登出此工作階段</button>}</section>:<form className="settings-form" onSubmit={event=>void bootstrap(event)}><section><KeyRound/><h2>建立管理員</h2><p>此操作只能從 localhost 執行。密碼只會以 Argon2 hash 儲存。</p><div className="form-grid"><label>使用者名稱<input required minLength={3} value={username} onChange={e=>setUsername(e.target.value)}/></label><label>密碼<input required type="password" minLength={12} autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)}/></label><label>確認密碼<input required type="password" minLength={12} autoComplete="new-password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)}/></label></div>{error&&<div className="alert error">{error}</div>}<button className="button primary">啟用遠端登入</button></section></form>}</div>}
+export function Access() {
+  const { t } = useI18n();
+  const client = useQueryClient();
+  const status = useQuery({
+    queryKey: ["auth-status"],
+    queryFn: getAuthStatus,
+  });
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const bootstrap = async (event: FormEvent) => {
+    event.preventDefault();
+    setError("");
+    if (password !== confirmPassword) {
+      setError(t("Passwords do not match"));
+      return;
+    }
+    try {
+      await post("/auth/bootstrap", { username, password });
+      setPassword("");
+      setConfirmPassword("");
+      setMessage(
+        t("Administrator created; devices on this domain must now sign in."),
+      );
+      await client.invalidateQueries({ queryKey: ["auth-status"] });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : t("Setup failed"));
+    }
+  };
+  const logout = async () => {
+    await post("/auth/logout");
+    await client.invalidateQueries({ queryKey: ["auth-status"] });
+  };
+  return (
+    <div className="page">
+      <header className="page-head">
+        <div>
+          <p className="eyebrow">REMOTE ACCESS</p>
+          <h1>{t("Access control")}</h1>
+          <p>
+            {t(
+              "LAN access uses an Argon2 administrator password, HttpOnly session, and CSRF validation.",
+            )}
+          </p>
+        </div>
+      </header>
+      {message && <div className="alert success">{message}</div>}
+      {status.data?.configured ? (
+        <section className="section-card access-status">
+          <ShieldCheck />
+          <div>
+            <h2>{t("Administrator configured")}</h2>
+            <p>
+              {status.data.authenticated
+                ? `${status.data.username} · ${status.data.role}`
+                : t(
+                    "Localhost currently requires no sign-in; remote addresses show the sign-in screen.",
+                  )}
+            </p>
+          </div>
+          {status.data.authenticated && (
+            <button className="button" onClick={() => void logout()}>
+              <LogOut size={15} />
+              {t("Sign out of this session")}
+            </button>
+          )}
+        </section>
+      ) : (
+        <form
+          className="settings-form"
+          onSubmit={(event) => void bootstrap(event)}
+        >
+          <section>
+            <KeyRound />
+            <h2>{t("Create administrator")}</h2>
+            <p>
+              {t(
+                "This action is available only from localhost. The password is stored only as an Argon2 hash.",
+              )}
+            </p>
+            <div className="form-grid">
+              <label>
+                {t("Username")}
+                <input
+                  required
+                  minLength={3}
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                />
+              </label>
+              <label>
+                {t("Password")}
+                <input
+                  required
+                  type="password"
+                  minLength={12}
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </label>
+              <label>
+                {t("Confirm password")}
+                <input
+                  required
+                  type="password"
+                  minLength={12}
+                  autoComplete="new-password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                />
+              </label>
+            </div>
+            {error && <div className="alert error">{error}</div>}
+            <button className="button primary">
+              {t("Enable remote sign-in")}
+            </button>
+          </section>
+        </form>
+      )}
+    </div>
+  );
+}

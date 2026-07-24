@@ -29,9 +29,11 @@ beforeEach(() => {
 test("lists projects and opens the create form", async () => {
   render(
     <QueryClientProvider client={new QueryClient()}>
-      <DialogProvider><MemoryRouter>
-        <Projects />
-      </MemoryRouter></DialogProvider>
+      <DialogProvider>
+        <MemoryRouter>
+          <Projects />
+        </MemoryRouter>
+      </DialogProvider>
     </QueryClientProvider>,
   );
   expect(await screen.findByText("Meeting Copilot")).toBeInTheDocument();

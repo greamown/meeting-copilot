@@ -5,25 +5,330 @@ import { getSettings, LanguageCode, put, SettingsData } from "../lib/api";
 import { useI18n } from "../i18n";
 import { useDialogs } from "../components/DialogProvider";
 
-const languages: Array<[LanguageCode,string]> = [["zh-TW","繁體中文"],["zh-CN","簡體中文"],["en","English"],["ja","日本語"],["ko","한국어"]];
+const languages: Array<[LanguageCode, string]> = [
+  ["zh-TW", "繁體中文"],
+  ["zh-CN", "簡體中文"],
+  ["en", "English"],
+  ["ja", "日本語"],
+  ["ko", "한국어"],
+];
 
 export function Settings() {
-  const {t}=useI18n();
-  const dialogs=useDialogs();
+  const { t } = useI18n();
+  const dialogs = useDialogs();
   const client = useQueryClient();
-  const query = useQuery({ queryKey:["settings"], queryFn:getSettings });
-  const [form,setForm] = useState<SettingsData|null>(null);
-  useEffect(()=>{ if(query.data) setForm(query.data); },[query.data]);
-  if(!form) return <div className="page">{t("loading")}</div>;
-  const field = <K extends keyof SettingsData>(key:K,value:SettingsData[K]) => setForm({...form,[key]:value});
-  const submit = async(event:FormEvent) => { event.preventDefault(); await put("/settings",form); await client.invalidateQueries({queryKey:["settings"]}); await dialogs.alert({title:t("settingsSaved"),message:t("settingsApplied")}); };
-  const testVoice = () => { const utterance=new SpeechSynthesisUtterance("語音速率與音量測試"); utterance.lang=form.tts_language; utterance.rate=form.tts_rate; utterance.volume=form.tts_volume; speechSynthesis.cancel(); speechSynthesis.speak(utterance); };
-  const options = (special?:[string,string]) => <>{special&&<option value={special[0]}>{special[1]}</option>}{languages.map(([code,label])=><option value={code} key={code}>{label}</option>)}</>;
+  const query = useQuery({ queryKey: ["settings"], queryFn: getSettings });
+  const [form, setForm] = useState<SettingsData | null>(null);
+  useEffect(() => {
+    if (query.data) setForm(query.data);
+  }, [query.data]);
+  if (!form) return <div className="page">{t("loading")}</div>;
+  const field = <K extends keyof SettingsData>(
+    key: K,
+    value: SettingsData[K],
+  ) => setForm({ ...form, [key]: value });
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    await put("/settings", form);
+    await client.invalidateQueries({ queryKey: ["settings"] });
+    await dialogs.alert({
+      title: t("settingsSaved"),
+      message: t("settingsApplied"),
+    });
+  };
+  const testVoice = () => {
+    const utterance = new SpeechSynthesisUtterance(
+      t("Speech rate and volume test"),
+    );
+    utterance.lang = form.tts_language;
+    utterance.rate = form.tts_rate;
+    utterance.volume = form.tts_volume;
+    speechSynthesis.cancel();
+    speechSynthesis.speak(utterance);
+  };
+  const options = (special?: [string, string]) => (
+    <>
+      {special && <option value={special[0]}>{special[1]}</option>}
+      {languages.map(([code, label]) => (
+        <option value={code} key={code}>
+          {label}
+        </option>
+      ))}
+    </>
+  );
 
-  return <div className="page"><header className="page-head"><div><p className="eyebrow">POLICY</p><h1>{t("systemSettings")}</h1><p>{t("settingsSubtitle")}</p></div></header><form className="settings-form" onSubmit={event=>void submit(event)}>
-    <section><h2>{t("languageMatrix")}</h2><div className="form-grid"><label>UI<select value={form.ui_language} onChange={e=>field("ui_language",e.target.value as LanguageCode)}>{options()}</select></label><label>{t("meetingInput")}<select value={form.meeting_input_language} onChange={e=>field("meeting_input_language",e.target.value as SettingsData["meeting_input_language"])}>{options(["auto",t("autoDetect")])}</select></label><label>{t("secondaryInput")}<select value={form.secondary_meeting_language} onChange={e=>field("secondary_meeting_language",e.target.value as SettingsData["secondary_meeting_language"])}>{options(["none",t("none")])}</select></label><label>{t("transcriptDisplay")}<select value={form.transcript_display_language} onChange={e=>field("transcript_display_language",e.target.value as SettingsData["transcript_display_language"])}>{options(["original",t("original")])}</select></label><label>{t("translation")}<select value={form.translation_language} onChange={e=>field("translation_language",e.target.value as SettingsData["translation_language"])}>{options(["none",t("noTranslation")])}</select></label><label>{t("suggestions")}<select value={form.suggestion_output_language} onChange={e=>field("suggestion_output_language",e.target.value as LanguageCode)}>{options()}</select></label><label>{t("summary")}<select value={form.summary_output_language} onChange={e=>field("summary_output_language",e.target.value as LanguageCode)}>{options()}</select></label><label>{t("export")}<select value={form.export_language} onChange={e=>field("export_language",e.target.value as SettingsData["export_language"])}>{options(["original",t("original")])}</select></label><label>TTS<select value={form.tts_language} onChange={e=>field("tts_language",e.target.value as LanguageCode)}>{options()}</select></label></div></section>
-    <section><h2>{t("triggerPolicy")}</h2><div className="form-grid"><label>{t("periodicSeconds")}<input type="number" min="30" max="3600" value={form.periodic_analysis_seconds} onChange={e=>field("periodic_analysis_seconds",Number(e.target.value))}/></label><label>{t("minimumCharacters")}<input type="number" min="20" value={form.minimum_new_characters} onChange={e=>field("minimum_new_characters",Number(e.target.value))}/></label><label>Codex cooldown<input type="number" min="0" value={form.codex_cooldown_seconds} onChange={e=>field("codex_cooldown_seconds",Number(e.target.value))}/></label><label>{t("suggestionCooldown")}<input type="number" min="0" value={form.suggestion_cooldown_seconds} onChange={e=>field("suggestion_cooldown_seconds",Number(e.target.value))}/></label><label>{t("contextMinutes")}<input type="number" min="1" value={form.maximum_recent_transcript_minutes} onChange={e=>field("maximum_recent_transcript_minutes",Number(e.target.value))}/></label><label>{t("contextCharacters")}<input type="number" min="1000" value={form.maximum_recent_transcript_characters} onChange={e=>field("maximum_recent_transcript_characters",Number(e.target.value))}/></label></div><label className="switch"><input type="checkbox" checked={form.automatic_analysis_enabled} onChange={e=>field("automatic_analysis_enabled",e.target.checked)}/><span/>{t("enableAutoAnalysis")}</label></section>
-    <section><h2>{t("speechPlayback")}</h2><div className="form-grid"><label>{t("voiceName")}<input value={form.tts_voice} onChange={e=>field("tts_voice",e.target.value)} placeholder={t("browserDefault")}/></label><label>{t("rate")} <output>{form.tts_rate}</output><input type="range" min="0.5" max="2" step="0.1" value={form.tts_rate} onChange={e=>field("tts_rate",Number(e.target.value))}/></label><label>{t("volume")} <output>{form.tts_volume}</output><input type="range" min="0" max="1" step="0.1" value={form.tts_volume} onChange={e=>field("tts_volume",Number(e.target.value))}/></label></div><button type="button" className="button" onClick={testVoice}><Volume2/>{t("testVoice")}</button></section>
-    <footer><button className="button primary"><Save/>{t("save")}</button></footer>
-  </form></div>;
+  return (
+    <div className="page">
+      <header className="page-head">
+        <div>
+          <p className="eyebrow">POLICY</p>
+          <h1>{t("systemSettings")}</h1>
+          <p>{t("settingsSubtitle")}</p>
+        </div>
+      </header>
+      <form className="settings-form" onSubmit={(event) => void submit(event)}>
+        <section>
+          <h2>{t("languageMatrix")}</h2>
+          <div className="form-grid">
+            <label>
+              UI
+              <select
+                value={form.ui_language}
+                onChange={(e) =>
+                  field("ui_language", e.target.value as LanguageCode)
+                }
+              >
+                {options()}
+              </select>
+            </label>
+            <label>
+              {t("meetingInput")}
+              <select
+                value={form.meeting_input_language}
+                onChange={(e) =>
+                  field(
+                    "meeting_input_language",
+                    e.target.value as SettingsData["meeting_input_language"],
+                  )
+                }
+              >
+                {options(["auto", t("autoDetect")])}
+              </select>
+            </label>
+            <label>
+              {t("secondaryInput")}
+              <select
+                value={form.secondary_meeting_language}
+                onChange={(e) =>
+                  field(
+                    "secondary_meeting_language",
+                    e.target
+                      .value as SettingsData["secondary_meeting_language"],
+                  )
+                }
+              >
+                {options(["none", t("none")])}
+              </select>
+            </label>
+            <label>
+              {t("transcriptDisplay")}
+              <select
+                value={form.transcript_display_language}
+                onChange={(e) =>
+                  field(
+                    "transcript_display_language",
+                    e.target
+                      .value as SettingsData["transcript_display_language"],
+                  )
+                }
+              >
+                {options(["original", t("original")])}
+              </select>
+            </label>
+            <label>
+              {t("translation")}
+              <select
+                value={form.translation_language}
+                onChange={(e) =>
+                  field(
+                    "translation_language",
+                    e.target.value as SettingsData["translation_language"],
+                  )
+                }
+              >
+                {options(["none", t("noTranslation")])}
+              </select>
+            </label>
+            <label>
+              {t("suggestions")}
+              <select
+                value={form.suggestion_output_language}
+                onChange={(e) =>
+                  field(
+                    "suggestion_output_language",
+                    e.target.value as LanguageCode,
+                  )
+                }
+              >
+                {options()}
+              </select>
+            </label>
+            <label>
+              {t("summary")}
+              <select
+                value={form.summary_output_language}
+                onChange={(e) =>
+                  field(
+                    "summary_output_language",
+                    e.target.value as LanguageCode,
+                  )
+                }
+              >
+                {options()}
+              </select>
+            </label>
+            <label>
+              {t("export")}
+              <select
+                value={form.export_language}
+                onChange={(e) =>
+                  field(
+                    "export_language",
+                    e.target.value as SettingsData["export_language"],
+                  )
+                }
+              >
+                {options(["original", t("original")])}
+              </select>
+            </label>
+            <label>
+              TTS
+              <select
+                value={form.tts_language}
+                onChange={(e) =>
+                  field("tts_language", e.target.value as LanguageCode)
+                }
+              >
+                {options()}
+              </select>
+            </label>
+          </div>
+        </section>
+        <section>
+          <h2>{t("triggerPolicy")}</h2>
+          <div className="form-grid">
+            <label>
+              {t("periodicSeconds")}
+              <input
+                type="number"
+                min="30"
+                max="3600"
+                value={form.periodic_analysis_seconds}
+                onChange={(e) =>
+                  field("periodic_analysis_seconds", Number(e.target.value))
+                }
+              />
+            </label>
+            <label>
+              {t("minimumCharacters")}
+              <input
+                type="number"
+                min="20"
+                value={form.minimum_new_characters}
+                onChange={(e) =>
+                  field("minimum_new_characters", Number(e.target.value))
+                }
+              />
+            </label>
+            <label>
+              Codex cooldown
+              <input
+                type="number"
+                min="0"
+                value={form.codex_cooldown_seconds}
+                onChange={(e) =>
+                  field("codex_cooldown_seconds", Number(e.target.value))
+                }
+              />
+            </label>
+            <label>
+              {t("suggestionCooldown")}
+              <input
+                type="number"
+                min="0"
+                value={form.suggestion_cooldown_seconds}
+                onChange={(e) =>
+                  field("suggestion_cooldown_seconds", Number(e.target.value))
+                }
+              />
+            </label>
+            <label>
+              {t("contextMinutes")}
+              <input
+                type="number"
+                min="1"
+                value={form.maximum_recent_transcript_minutes}
+                onChange={(e) =>
+                  field(
+                    "maximum_recent_transcript_minutes",
+                    Number(e.target.value),
+                  )
+                }
+              />
+            </label>
+            <label>
+              {t("contextCharacters")}
+              <input
+                type="number"
+                min="1000"
+                value={form.maximum_recent_transcript_characters}
+                onChange={(e) =>
+                  field(
+                    "maximum_recent_transcript_characters",
+                    Number(e.target.value),
+                  )
+                }
+              />
+            </label>
+          </div>
+          <label className="switch">
+            <input
+              type="checkbox"
+              checked={form.automatic_analysis_enabled}
+              onChange={(e) =>
+                field("automatic_analysis_enabled", e.target.checked)
+              }
+            />
+            <span />
+            {t("enableAutoAnalysis")}
+          </label>
+        </section>
+        <section>
+          <h2>{t("speechPlayback")}</h2>
+          <div className="form-grid">
+            <label>
+              {t("voiceName")}
+              <input
+                value={form.tts_voice}
+                onChange={(e) => field("tts_voice", e.target.value)}
+                placeholder={t("browserDefault")}
+              />
+            </label>
+            <label>
+              {t("rate")} <output>{form.tts_rate}</output>
+              <input
+                type="range"
+                min="0.5"
+                max="2"
+                step="0.1"
+                value={form.tts_rate}
+                onChange={(e) => field("tts_rate", Number(e.target.value))}
+              />
+            </label>
+            <label>
+              {t("volume")} <output>{form.tts_volume}</output>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.1"
+                value={form.tts_volume}
+                onChange={(e) => field("tts_volume", Number(e.target.value))}
+              />
+            </label>
+          </div>
+          <button type="button" className="button" onClick={testVoice}>
+            <Volume2 />
+            {t("testVoice")}
+          </button>
+        </section>
+        <footer>
+          <button className="button primary">
+            <Save />
+            {t("save")}
+          </button>
+        </footer>
+      </form>
+    </div>
+  );
 }
