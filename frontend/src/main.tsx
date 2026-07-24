@@ -14,6 +14,7 @@ import "./knowledge.css";
 import "./languages.css";
 import "./auth.css";
 import "./dialogs.css";
+import "./responsive.css";
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 5_000 } } });
 createRoot(document.getElementById("root")!).render(<StrictMode><ErrorBoundary><QueryClientProvider client={queryClient}><I18nProvider><DialogProvider><BrowserRouter><App/></BrowserRouter></DialogProvider></I18nProvider></QueryClientProvider></ErrorBoundary></StrictMode>);

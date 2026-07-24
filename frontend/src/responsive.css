@@ -1,0 +1,333 @@
+:where(.page, .live) :where(p, small, strong, code, dd) {
+  overflow-wrap: anywhere;
+}
+
+:where(.page-head, .head-actions, .button-row, .panel-head, .form-footer, .export-bar, .card-actions) > * {
+  min-width: 0;
+}
+
+.button,
+.icon-button {
+  min-width: 0;
+  min-height: 40px;
+  max-width: 100%;
+}
+
+.button {
+  height: auto;
+  line-height: 1.25;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.button svg,
+.icon-button svg {
+  flex: 0 0 auto;
+}
+
+.truncate {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card-actions,
+.export-bar,
+.form-footer,
+.settings-form > footer,
+.ask > div {
+  flex-wrap: wrap;
+}
+
+.provider > code,
+.provider dd,
+.system-row > :where(span, strong),
+.state-panel p,
+.suggestions article > :where(p, small) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.check-detail {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.check-detail small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.check-detail code {
+  padding: 7px 9px;
+  background: #fff3f0;
+  color: #8b2e22;
+  white-space: normal;
+  user-select: all;
+}
+
+.wizard > ol {
+  background: #e8edef;
+  color: #58666c;
+  border-right: 1px solid #c7d0d2;
+}
+
+.wizard > ol li > span {
+  border-color: #89979c;
+  color: #425159;
+  background: transparent;
+}
+
+.wizard > ol li.active {
+  color: #172429;
+  background: #fff;
+  box-shadow: inset 3px 0 #176b75;
+}
+
+.wizard > ol li.active > span {
+  color: #fff;
+  background: #176b75;
+  border-color: #176b75;
+}
+
+.wizard > ol li.done {
+  color: #35665d;
+}
+
+.wizard > ol li.done > span {
+  color: #35665d;
+  border-color: #78a097;
+}
+
+.prep,
+.settings-form {
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.prep > section,
+.settings-form > section,
+.prep > footer,
+.settings-form > footer,
+.form-grid,
+.form-grid > label,
+.form-grid :where(input, select, textarea) {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.tabs,
+.view-tabs {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+@media (max-width: 800px) {
+  .page-head {
+    align-items: stretch;
+    gap: 14px;
+  }
+
+  .page-head > :first-child {
+    min-width: 0;
+  }
+
+  .head-actions {
+    flex-wrap: wrap;
+  }
+
+  .live-head {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .live-head .head-actions {
+    justify-content: stretch;
+  }
+
+  .live-head .head-actions .button {
+    flex: 1 1 auto;
+  }
+
+  .panel-head {
+    height: auto;
+    min-height: 58px;
+    padding-block: 10px;
+    flex-wrap: wrap;
+  }
+
+  .panel-head h2 {
+    flex: 1 1 auto;
+  }
+
+  .transcript-panel .panel-head .search {
+    order: 3;
+    flex: 1 1 100%;
+  }
+
+  .transcript-panel .panel-head .search input {
+    width: 100%;
+  }
+
+  .suggestion-panel .panel-head .button-row {
+    flex: 1 1 100%;
+  }
+
+  .suggestion-panel .panel-head .button {
+    flex: 1 1 120px;
+  }
+
+  .compact-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+  }
+
+  .transcript-list > article {
+    grid-template-columns: 48px minmax(0, 1fr) 36px;
+    gap: 8px;
+    padding-inline: 10px;
+  }
+
+  .transcript-list > article > div,
+  .suggestions > article,
+  .suggestion-actions {
+    min-width: 0;
+  }
+
+  .row-tools {
+    flex-direction: column;
+  }
+
+  .row-tools button,
+  .suggestion-actions button {
+    min-width: 34px;
+    min-height: 34px;
+  }
+
+  .suggestion-actions .text-action {
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  .ask > div {
+    gap: 8px;
+  }
+
+  .ask > div > span {
+    flex: 1 1 100%;
+  }
+
+  .toggle-list > label {
+    grid-template-columns: 24px minmax(0, 1fr);
+    gap: 4px 8px;
+    align-items: start;
+  }
+
+  .toggle-list > label > small {
+    grid-column: 2;
+  }
+
+  .toggle-list .consent {
+    grid-template-columns: 24px 24px minmax(0, 1fr);
+  }
+
+  .toggle-list .consent > span {
+    grid-column: 3;
+  }
+
+  .section-card .system-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .section-card .system-row > .button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .export-bar strong {
+    flex: 1 1 calc(100% - 32px);
+    margin-right: 0;
+  }
+
+  .detail-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .detail-row > p,
+  .detail-row > small {
+    grid-column: 1 / -1;
+  }
+
+  .modal > footer,
+  .app-dialog > footer {
+    flex-wrap: wrap;
+  }
+
+  .modal > footer .button,
+  .app-dialog > footer .button {
+    flex: 1 1 120px;
+  }
+
+  .toast {
+    right: 12px;
+    bottom: 76px;
+    left: 12px;
+    max-width: none;
+  }
+}
+
+@media (max-width: 650px) {
+  .sidebar nav a.active span {
+    display: inline;
+    max-width: 72px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 480px) {
+  .page-head {
+    flex-direction: column;
+  }
+
+  .page-head > .search,
+  .page-head > .search input {
+    width: 100%;
+  }
+
+  .fact-grid,
+  .policy,
+  .detail-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .detail-summary > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .detail-summary > div:last-child {
+    border-bottom: 0;
+  }
+
+  .prep > section,
+  .settings-form > section,
+  .section-card {
+    padding-inline: 16px;
+  }
+
+  .form-footer .button,
+  .settings-form > footer .button {
+    flex: 1 1 120px;
+  }
+}
