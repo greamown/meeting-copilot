@@ -77,12 +77,25 @@ export interface ActionItem { id:string; project_id:string|null; meeting_id:stri
 export interface KnowledgeDocument { id:string; project_id:string|null; source_type:string; title:string; content:string; language:string; metadata_json:Record<string,unknown>; created_at:string; updated_at:string; }
 export interface KnowledgeSearchResult { id:string; source_type:string; project_id:string|null; meeting_id:string|null; title:string; excerpt:string; language:string; status:string|null; created_at:string; }
 export interface AuthStatus { configured:boolean; authentication_required:boolean; authenticated:boolean; username:string|null; role:string|null; }
+export interface MeetingAnalytics {
+  meeting_id:string; duration_seconds:number; duration_source:"meeting_timestamps"|"transcript_timeline";
+  transcript:{segments:number;characters:number;speakers:Array<{speaker_id:string;seconds:number;share:number|null}>;speaker_labelled_ratio:number|null};
+  suggestions:{total:number;by_status:Record<string,number>};
+  suggestion_rates:Record<string,number|null>;
+  decisions:{total:number;by_status:Record<string,number>};
+  open_questions:{total:number;by_status:Record<string,number>};
+  risks:{total:number;by_status:Record<string,number>};
+  actions:{total:number;with_owner:number;with_due_date:number;completed:number;overdue:number;average_completion_hours:number|null};
+  engine_runs:{total:number;by_status:Record<string,number>;average_duration_ms:number|null;failure_rate:number|null;timeout_rate:number|null};
+  effectiveness:{decisions_per_hour:number|null;actions_with_owner_ratio:number|null;actions_with_due_date_ratio:number|null;unresolved_question_ratio:number|null};
+}
 
 const loose = z.any();
 export const request = <T>(path:string, init?:RequestInit):Promise<T> => api(path, loose, init) as Promise<T>;
 export const getProviders = ():Promise<Provider[]> => request("/providers");
 export const getMeetings = ():Promise<Meeting[]> => request("/meetings");
 export const getMeeting = (id:string):Promise<MeetingDetail> => request(`/meetings/${id}`);
+export const getMeetingAnalytics = (id:string):Promise<MeetingAnalytics> => request(`/meetings/${id}/analytics`);
 export const getSettings = ():Promise<SettingsData> => request("/settings");
 export const getCodexStatus = ():Promise<CodexStatus> => request("/codex/status");
 export const getCodexLoginStatus = ():Promise<CodexLoginStatus> => request("/codex/login/status");

@@ -1,7 +1,7 @@
 import os
 from unittest.mock import AsyncMock
 
-os.environ["MC_DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+os.environ.setdefault("MC_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 from fastapi.testclient import TestClient
 
@@ -44,6 +44,7 @@ def test_audio_websocket_persists_transcript_and_enforces_glossary(monkeypatch):
                 "title": "Audio",
                 "privacy_acknowledged": True,
                 "secondary_language": "en",
+                "automatic_analysis_enabled": False,
             },
         ).json()
         client.post(f"/api/meetings/{meeting['id']}/start")
@@ -63,6 +64,31 @@ def test_audio_websocket_persists_transcript_and_enforces_glossary(monkeypatch):
             if event["meeting_id"] == meeting["id"]
         }
         assert {"transcript.partial", "transcript.final"}.issubset(event_types)
+
+
+def test_saved_audio_downloads_as_playable_wav(monkeypatch):
+    monkeypatch.setattr(FasterWhisperService, "transcribe", AsyncMock(return_value=[]))
+    with TestClient(app) as client:
+        meeting = client.post(
+            "/api/meetings",
+            json={"title": "Recorded", "privacy_acknowledged": True, "save_audio": True},
+        ).json()
+        client.post(f"/api/meetings/{meeting['id']}/start")
+        with client.websocket_connect(f"/api/meetings/{meeting['id']}/audio") as socket:
+            for sequence in range(3):
+                socket.send_bytes(sequence.to_bytes(8, "little") + bytes(16_000))
+                assert socket.receive_json()["sequence"] == sequence
+        try:
+            response = client.get(f"/api/meetings/{meeting['id']}/audio")
+            assert response.status_code == 200
+            assert response.headers["content-type"] == "audio/wav"
+            body = response.content
+            assert body[:4] == b"RIFF" and body[8:12] == b"WAVE"
+            # 3 chunks of 16 kB PCM plus the 44-byte header, and the header must agree.
+            assert len(body) == 48_000 + 44
+            assert int.from_bytes(body[40:44], "little") == 48_000
+        finally:
+            client.delete(f"/api/meetings/{meeting['id']}")
 
 
 def test_audio_websocket_reports_lost_chunk():

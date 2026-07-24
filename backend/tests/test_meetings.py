@@ -44,6 +44,57 @@ async def test_meeting_create_is_idempotent(client):
     assert conflict.status_code == 409
 
 
+async def test_meeting_analytics_counts_from_database(client):
+    meeting_id = (
+        await client.post(
+            "/api/meetings",
+            json={"title": "Analytics", "goal": "Count things", "privacy_acknowledged": True},
+        )
+    ).json()["id"]
+    await client.post(f"/api/meetings/{meeting_id}/start")
+    await client.post(
+        "/api/decisions",
+        json={"meeting_id": meeting_id, "title": "Ship it", "description": "Agreed"},
+    )
+    await client.post(
+        "/api/actions",
+        json={
+            "meeting_id": meeting_id,
+            "title": "Write the migration",
+            "owner": "Alice",
+            "due_at": "2020-01-01T00:00:00Z",
+        },
+    )
+    await client.post(
+        "/api/actions", json={"meeting_id": meeting_id, "title": "Unassigned follow-up"}
+    )
+    await client.post(f"/api/meetings/{meeting_id}/end")
+
+    analytics = (await client.get(f"/api/meetings/{meeting_id}/analytics")).json()
+    assert analytics["duration_source"] == "meeting_timestamps"
+    assert analytics["decisions"]["total"] == 1
+    assert analytics["actions"] == {
+        "total": 2,
+        "with_owner": 1,
+        "with_due_date": 1,
+        "completed": 0,
+        "overdue": 1,
+        "average_completion_hours": None,
+    }
+    assert analytics["effectiveness"]["actions_with_owner_ratio"] == 0.5
+    assert analytics["transcript"]["segments"] == 0
+
+
+async def test_meeting_audio_download_requires_stored_audio(client):
+    meeting_id = (
+        await client.post(
+            "/api/meetings",
+            json={"title": "No audio", "privacy_acknowledged": True},
+        )
+    ).json()["id"]
+    assert (await client.get(f"/api/meetings/{meeting_id}/audio")).status_code == 404
+
+
 async def test_provider_registry_masks_secret(client, monkeypatch):
     monkeypatch.setenv("TEST_PROVIDER_KEY", "do-not-return")
     payload = {
