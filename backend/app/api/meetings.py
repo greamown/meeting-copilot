@@ -268,12 +268,14 @@ async def transition(
 
 
 @router.post("/meetings/{meeting_id}/start", response_model=CommandResponse)
-async def start(meeting_id: str, db: AsyncSession = Depends(get_db)) -> CommandResponse:
-    return CommandResponse(
-        meeting=MeetingRead.model_validate(
-            await transition(db, meeting_id, {"draft", "interrupted"}, "active", "meeting.started")
-        )
+async def start(
+    meeting_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> CommandResponse:
+    meeting = await transition(
+        db, meeting_id, {"draft", "interrupted"}, "active", "meeting.started"
     )
+    return CommandResponse(meeting=MeetingRead.model_validate(meeting))
 
 
 @router.post("/meetings/{meeting_id}/pause", response_model=CommandResponse)
@@ -1189,14 +1191,22 @@ async def audio_socket(
                                     config.get("automatic_analysis_enabled", True)
                                 ),
                                 new_characters=accumulated_characters,
-                                minimum_characters=int(config.get("minimum_new_characters", 300)),
+                                minimum_characters=int(
+                                    config.get(
+                                        "minimum_new_characters",
+                                        settings.minimum_new_characters,
+                                    )
+                                ),
                                 last_codex_at=(
                                     datetime.fromisoformat(state["last_codex_run_at"])
                                     if state.get("last_codex_run_at")
                                     else None
                                 ),
                                 codex_cooldown_seconds=int(
-                                    config.get("codex_cooldown_seconds", 60)
+                                    config.get(
+                                        "codex_cooldown_seconds",
+                                        settings.codex_cooldown_seconds,
+                                    )
                                 ),
                                 last_suggestion_at=(
                                     datetime.fromisoformat(state["last_suggestion_at"])
@@ -1204,17 +1214,24 @@ async def audio_socket(
                                     else None
                                 ),
                                 suggestion_cooldown_seconds=int(
-                                    config.get("suggestion_cooldown_seconds", 180)
+                                    config.get(
+                                        "suggestion_cooldown_seconds",
+                                        settings.suggestion_cooldown_seconds,
+                                    )
                                 ),
                             )
                         )
-                        active_run = await db.scalar(
-                            select(func.count())
-                            .select_from(CodexRun)
-                            .where(
-                                CodexRun.meeting_id == meeting_id,
-                                CodexRun.status.in_(["queued", "running", "validating"]),
+                        active_run = (
+                            await db.scalar(
+                                select(func.count())
+                                .select_from(CodexRun)
+                                .where(
+                                    CodexRun.meeting_id == meeting_id,
+                                    CodexRun.status.in_(["queued", "running", "validating"]),
+                                )
                             )
+                            if trigger.invoke
+                            else 0
                         )
                         if trigger.invoke and not active_run:
                             state["new_transcript_characters"] = 0

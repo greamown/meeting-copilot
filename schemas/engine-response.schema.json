@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["should_suggest", "confidence", "category", "suggestion", "reason", "follow_up_question", "evidence_segment_ids", "summary_patch", "next_steps", "suggested_agenda", "translations", "state_patch"],
+  "required": ["should_suggest", "confidence", "category", "suggestion", "reason", "follow_up_question", "evidence_segment_ids", "summary_patch", "next_steps", "suggested_agenda", "translations", "signals", "state_patch"],
   "properties": {
     "should_suggest": {"type": "boolean"},
     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
@@ -31,6 +31,17 @@
           "language": {"enum": ["zh-TW", "zh-CN", "en", "ja", "ko"]},
           "text": {"type": "string", "minLength": 1, "maxLength": 20000}
         }
+      }
+    },
+    "signals": {
+      "type": "object", "additionalProperties": false,
+      "required": ["question_detected", "discussion_stuck", "missing_risk_detected", "contradiction_detected", "decision_point_detected"],
+      "properties": {
+        "question_detected": {"type": "boolean"},
+        "discussion_stuck": {"type": "boolean"},
+        "missing_risk_detected": {"type": "boolean"},
+        "contradiction_detected": {"type": "boolean"},
+        "decision_point_detected": {"type": "boolean"}
       }
     },
     "state_patch": {

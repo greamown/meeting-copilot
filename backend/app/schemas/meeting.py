@@ -123,6 +123,24 @@ class TranscriptTranslation(BaseModel):
     text: str = Field(min_length=1, max_length=20000)
 
 
+class SuggestionSignals(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question_detected: bool = False
+    discussion_stuck: bool = False
+    missing_risk_detected: bool = False
+    contradiction_detected: bool = False
+    decision_point_detected: bool = False
+
+    def score(self) -> float:
+        return (
+            self.question_detected * 0.25
+            + self.discussion_stuck * 0.20
+            + self.missing_risk_detected * 0.20
+            + self.contradiction_detected * 0.15
+            + self.decision_point_detected * 0.20
+        )
+
+
 SuggestionCategory = Literal[
     "answer",
     "missing_decision",
@@ -151,6 +169,7 @@ class EngineOutput(BaseModel):
     next_steps: list[str] = Field(default_factory=list, max_length=20)
     suggested_agenda: list[str] = Field(default_factory=list, max_length=20)
     translations: list[TranscriptTranslation] = Field(default_factory=list, max_length=100)
+    signals: SuggestionSignals = Field(default_factory=SuggestionSignals)
 
 
 class SuggestionRead(BaseModel):

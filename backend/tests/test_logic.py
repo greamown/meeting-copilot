@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from app.core.config import Settings
 from app.db.base import Meeting, ProjectGlossary, ProjectMemory, TranscriptSegment
 from app.schemas.common import ProviderBase
-from app.schemas.meeting import EngineOutput
+from app.schemas.meeting import EngineOutput, SuggestionSignals
 from app.services.engine import build_request
 from app.services.glossary import normalize_transcript, normalize_translation
 from app.services.stt import whisper_language
@@ -23,7 +23,7 @@ from app.services.trigger import (
 
 def test_trigger_suppressors_and_manual_override():
     context = TriggerContext(
-        text="Should we decide?", status="active", automatic_enabled=True, new_characters=20
+        text="brief update", status="active", automatic_enabled=True, new_characters=20
     )
     assert decide_trigger(context).suppressed_by == "insufficient_transcript"
     assert decide_trigger(context, manual=True).trigger == "manual_ask"
@@ -36,6 +36,25 @@ def test_trigger_question_and_cooldown():
     assert decide_trigger(context).trigger == "explicit_question"
     cooling = TriggerContext(**{**context.__dict__, "last_codex_at": datetime.now(UTC)})
     assert decide_trigger(cooling).suppressed_by == "codex_cooldown"
+
+
+def test_short_explicit_question_bypasses_periodic_character_threshold():
+    decision = decide_trigger(TriggerContext("現在要選哪個方案？", "active", True, 10))
+    assert decision.invoke
+    assert decision.trigger == "explicit_question"
+
+
+def test_suggestion_signal_score_requires_multiple_strong_signals():
+    low = SuggestionSignals(question_detected=True, decision_point_detected=True)
+    high = SuggestionSignals(
+        question_detected=True,
+        discussion_stuck=True,
+        missing_risk_detected=True,
+        contradiction_detected=True,
+        decision_point_detected=True,
+    )
+    assert low.score() == 0.45
+    assert high.score() == 1
 
 
 def test_overlap_and_similarity():

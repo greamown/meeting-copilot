@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     secret_file: Path = Path("runtime/secrets.json.enc")
     secret_key: str | None = None
     max_audio_frame_bytes: int = 64_000
+    minimum_new_characters: int = 300
+    codex_cooldown_seconds: int = 60
+    suggestion_cooldown_seconds: int = 180
     max_request_body_bytes: int = 2_000_000
     engine_timeout_seconds: int = 180
     remote_auth_required: bool = False

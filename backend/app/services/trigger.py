@@ -41,7 +41,6 @@ def decide_trigger(
         (context.status != "active", "meeting_not_active"),
         (not context.automatic_enabled, "automatic_disabled"),
         (context.codex_running, "codex_running"),
-        (context.new_characters < context.minimum_characters, "insufficient_transcript"),
         (context.confidence < 0.45, "low_confidence"),
         (
             bool(
@@ -63,12 +62,16 @@ def decide_trigger(
         if active:
             return TriggerDecision(False, None, reason)
     lowered = context.text.lower()
-    if "codex" in lowered or "助理" in lowered:
+    if "codex" in lowered or "助理" in lowered or " ai " in f" {lowered} ":
         return TriggerDecision(True, "direct_mention", None)
     if "?" in context.text or "？" in context.text:
         return TriggerDecision(True, "explicit_question", None)
+    if any(word in lowered for word in ("矛盾", "但是", "可是", "然而", "卻", "but", "however")):
+        return TriggerDecision(True, "contradiction_signal", None)
     if any(word in context.text for word in ("決定", "結論", "同意", "風險", "問題")):
         return TriggerDecision(True, "decision_keyword", None)
+    if context.new_characters < context.minimum_characters:
+        return TriggerDecision(False, None, "insufficient_transcript")
     return TriggerDecision(True, "periodic_analysis", None)
 
 

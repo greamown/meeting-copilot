@@ -34,7 +34,7 @@ async def main() -> None:
         output = sys.argv[sys.argv.index("--output-last-message") + 1]
         if mode == "sleep": time.sleep(2)
         if mode == "invalid": result = "not json"
-        else: result = json.dumps({"should_suggest": True, "confidence": 0.9, "category": "missing_decision", "suggestion": "Define the retry owner.", "reason": "Ownership is unresolved.", "follow_up_question": None, "evidence_segment_ids": [], "state_patch": {"current_topic": "Retries", "add_decisions": [], "add_open_questions": ["Who owns retries?"], "add_risks": [], "add_action_items": [], "add_parking_lot": []}})
+        else: result = json.dumps({"should_suggest": True, "confidence": 0.9, "category": "missing_decision", "suggestion": "Define the retry owner.", "reason": "Ownership is unresolved.", "follow_up_question": None, "evidence_segment_ids": [], "signals": {"question_detected": True, "discussion_stuck": True, "missing_risk_detected": True, "contradiction_detected": True, "decision_point_detected": True}, "state_patch": {"current_topic": "Retries", "add_decisions": [], "add_open_questions": ["Who owns retries?"], "add_risks": [], "add_action_items": [], "add_parking_lot": []}})
         open(output, "w").write(result)
     """)
     )

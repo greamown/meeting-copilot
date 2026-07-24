@@ -1,6 +1,6 @@
 import os
 
-os.environ["MC_DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
+os.environ.setdefault("MC_DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 
 import pytest
 from httpx import ASGITransport, AsyncClient

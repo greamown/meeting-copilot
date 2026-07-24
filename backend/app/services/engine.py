@@ -39,7 +39,14 @@ MUST:
 - Do not claim facts not supported by the transcript or referenced files.
 - Do not modify files. Do not access the network. Do not execute destructive commands.
 - Return valid JSON conforming to the provided schema.
-- Set should_suggest=false when there is no material new value.
+- Score proactive suggestions using these boolean signals:
+  question_detected*0.25 + discussion_stuck*0.20 + missing_risk_detected*0.20
+  + contradiction_detected*0.15 + decision_point_detected*0.20.
+- Set should_suggest=true only when that score is greater than 0.75 and confidence is at
+  least 0.65. Always return the five signal values in `signals`.
+- Set should_suggest=false for ordinary information exchange, a speaker still developing an
+  idea, low confidence, repeated advice, or when recent discussion has not progressed enough
+  since the last suggestion.
 - Avoid repeating recent suggestions. Keep suggestions concise and actionable.
 - Distinguish facts, inferences, risks, and questions.
 - Never replace original transcript text. When a translation target is configured, return
@@ -477,7 +484,13 @@ class EngineManager:
                 raise ValueError("Codex cited transcript segments outside the request")
             run.response_json = result.model_dump(mode="json")
             await apply_state_patch(db, meeting, result)
-            if result.should_suggest and result.suggestion:
+            suggestion_score = result.signals.score()
+            if (
+                result.should_suggest
+                and result.suggestion
+                and suggestion_score > 0.75
+                and result.confidence >= 0.65
+            ):
                 recent = list(
                     (
                         await db.scalars(
@@ -515,6 +528,7 @@ class EngineManager:
                             "suggestion_id": suggestion.id,
                             "category": suggestion.category,
                             "content": suggestion.content,
+                            "score": suggestion_score,
                         },
                     )
                 else:
@@ -525,6 +539,14 @@ class EngineManager:
                         "cli-worker",
                         {"run_id": run.id, "category": result.category},
                     )
+            elif result.should_suggest and result.suggestion:
+                await emit(
+                    db,
+                    meeting.id,
+                    "suggestion.low_score_suppressed",
+                    "cli-worker",
+                    {"run_id": run.id, "score": suggestion_score},
+                )
             run.status = "completed"
             await emit(
                 db,
